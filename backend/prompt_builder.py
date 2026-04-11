@@ -697,6 +697,37 @@ def build_system_prompt(
         "Vérifie le codename dans clothing_state AVANT de copier une tenue."
     )
 
+    # ─── Character → actor lock (across all sequences) ──
+    # Even if location isn't set yet, we want the lock to be visible.
+    char_actors = (consistency_state or {}).get("character_actors", {}) or {}
+    if char_actors:
+        lock_lines = [
+            "## 🔒 PERSONNAGES VERROUILLÉS (NE PAS RE-MAPPER)",
+            "Ces personnages ont déjà été présentés au joueur. Tu DOIS réutiliser EXACTEMENT le même",
+            "codename d'acteur pour chaque nom de personnage. Ne change JAMAIS le codename associé à un nom.",
+            "",
+        ]
+        for display_name, actor_code in sorted(char_actors.items()):
+            actor_data = ACTOR_REGISTRY.get(actor_code, {})
+            tw = actor_data.get("trigger_word") or actor_data.get("prompt_prefix", "").split(",")[0] or actor_code
+            lock_lines.append(f"- **{display_name}** → codename `{actor_code}` (trigger word : `{tw}`)")
+        lock_lines.append(
+            "\n⚠️ Si tu écris une scène avec un de ces personnages :"
+        )
+        lock_lines.append(
+            "  1. Mets son codename ci-dessus dans `actors_present` (UNIQUEMENT lui, pas un autre acteur)"
+        )
+        lock_lines.append(
+            "  2. Commence le `image_prompt` par son trigger word EXACT"
+        )
+        lock_lines.append(
+            "  3. Ne mélange JAMAIS deux acteurs dans `actors_present` pour le même personnage"
+        )
+        lock_lines.append(
+            "  4. Si la scène n'a qu'UN personnage, `actors_present` doit contenir UN SEUL codename"
+        )
+        sections.append("\n".join(lock_lines))
+
     # ─── Current state (consistency tracker) ──────────────
     if consistency_state and consistency_state.get("location"):
         state_lines = [f"## État actuel (séquence {sequence_number})"]

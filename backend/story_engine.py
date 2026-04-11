@@ -70,6 +70,9 @@ class ConsistencyTracker:
         self.previous_prompts: list[str] = []
         self.prompt_overrides: dict[int, str] = {}  # image_index → user-edited prompt
         self.secondary_characters: dict[str, str] = {}  # codename → physical description
+        # Lock: character display name → actor codename (first binding wins)
+        # Prevents the agent from re-mapping "Camille" from `wh1te` to `nataly` mid-story
+        self.character_actors: dict[str, str] = {}
 
     def update_from_tool_call(self, args: dict):
         loc = args.get("location_description", "")
@@ -90,6 +93,15 @@ class ConsistencyTracker:
         for code, desc in args.get("secondary_characters", {}).items():
             if desc:
                 self.secondary_characters[code] = desc
+        # Lock character_name → actor_code on first binding (don't overwrite)
+        # The agent passes character_names = {codename: display_name} in the tool call.
+        char_names = args.get("character_names", {}) or {}
+        for code, display_name in char_names.items():
+            if not code or not display_name:
+                continue
+            display_name = display_name.strip()
+            if display_name and display_name not in self.character_actors:
+                self.character_actors[display_name] = code
 
     def _extract_clothing_from_prompt(self, prompt: str, actors: list[str]):
         """Best-effort extraction of clothing descriptions from image prompts."""
@@ -115,6 +127,7 @@ class ConsistencyTracker:
             "props": list(self.props),
             "prompt_overrides": dict(self.prompt_overrides),
             "secondary_characters": dict(self.secondary_characters),
+            "character_actors": dict(self.character_actors),
         }
 
 
