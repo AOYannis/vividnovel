@@ -137,6 +137,13 @@ def build_system_prompt(
         "Tu es un SCÉNARISTE. Tu décris un storyboard — une suite de plans de caméra\n"
         "qui racontent une VRAIE histoire, riche et immersive.\n"
         "\n"
+        "### Structure générale\n"
+        "L'histoire commence par un **INTRO ARC de 2 séquences** où le joueur rencontre\n"
+        "TOUS les personnages du casting (chacun avec un mini-arc, dans une situation distincte).\n"
+        "Après ces 2 séquences, le joueur a fait connaissance et choisit qui suivre — l'histoire\n"
+        "se poursuit librement avec ce personnage, mais les autres restent disponibles pour recroiser\n"
+        "le joueur, créer des tensions, ou ouvrir de nouveaux arcs en parallèle.\n"
+        "\n"
         "### Principes fondamentaux\n"
         "- Le joueur vit une AVENTURE — pas une course vers le sexe\n"
         "- Les personnages sont des VRAIES PERSONNES : ils ont une vie, des opinions,\n"
@@ -261,25 +268,49 @@ def build_system_prompt(
 
     cast_text = (
         f"## Casting\n"
-        f"{len(cast_actors)} personnage(s) dans le casting du joueur, classés par PRIORITÉ de rencontre.\n"
-        f"Le premier personnage est celui que le joueur rencontrera en PREMIER.\n"
-        f"Les suivants apparaissent NATURELLEMENT au fil de l'histoire — pas besoin de tous les montrer dès le début.\n"
-        f"Chaque personnage peut devenir principal ou rester secondaire selon les choix du joueur.\n\n"
+        f"{len(cast_actors)} personnage(s) dans le casting du joueur. Tous doivent être présentés au joueur "
+        f"dans les **2 premières séquences (intro arc)**, chacun avec un mini-arc narratif distinct.\n"
+        f"Aucun ordre de priorité — c'est le joueur qui décidera lequel suivre par ses choix.\n"
+        f"Après les séquences d'intro, les personnages non choisis restent disponibles : ils peuvent recroiser "
+        f"le joueur plus tard, dans les mêmes ou de nouvelles situations.\n\n"
         f"IMPORTANT : dans l'histoire, donne-leur un PRÉNOM crédible et adapté au cadre "
         f"(pas leur nom technique). Mais dans les appels generate_scene_image, "
-        f"utilise TOUJOURS leur codename technique dans actors_present.\n"
+        f"utilise TOUJOURS leur codename technique dans actors_present.\n\n"
+        f"⚠️ **RÈGLE STRICTE D'IMMERSION** : NE JAMAIS mentionner dans la NARRATION (texte que le joueur lit) :\n"
+        f"- Le nom d'origine d'un personnage de jeu vidéo, anime, film ou autre média (Ciri, Yennefer, "
+        f"Lara Croft, etc.)\n"
+        f"- L'univers d'origine (« The Witcher », « Final Fantasy », « Marvel », etc.)\n"
+        f"- Le mot « jeu vidéo », « manga », « anime », « film », « personnage de »\n"
+        f"Le personnage existe DANS L'UNIVERS DE TON HISTOIRE, pas en tant que référence externe.\n"
+        f"Donne-lui un prénom local et décris son apparence avec tes propres mots dans la narration.\n"
+        f"Les descriptions ci-dessous (\"Apparence\") sont UNIQUEMENT pour les prompts image — NE PAS les "
+        f"recopier ni les paraphraser dans la narration.\n"
     )
+    actor_genders = (cast or {}).get("actor_genders", {}) or {}
     for i, (code, actor_data) in enumerate(cast_actors):
         is_custom = actor_data.get('is_custom', False)
+        gender = actor_genders.get(code, "female")
+        gender_label = " — TRANS / SHEMALE" if gender == "trans" else ""
         cast_text += (
-            f"\n### Personnage {i + 1} (codename: {code})\n"
-            f"- Apparence : {actor_data['description']}\n"
+            f"\n### Personnage {i + 1} (codename: {code}){gender_label}\n"
+            f"- Apparence (POUR IMAGE PROMPTS UNIQUEMENT, ne pas mentionner dans la narration) : {actor_data['description']}\n"
             f"{_actor_prompt_instruction(actor_data, code)}\n"
         )
         if is_custom:
             cast_text += f"- Personnage personnalisé : invente une apparence cohérente avec le cadre\n"
         else:
-            cast_text += f"- Donne-lui un prénom adapté au cadre ({setting_label})\n"
+            cast_text += f"- Donne-lui un prénom adapté au cadre ({setting_label}) — INVENTE un prénom local, n'utilise PAS de nom de personnage célèbre\n"
+        if gender == "trans":
+            cast_text += (
+                f"- ⚠️ **Personnage TRANS / SHEMALE** : c'est une femme avec un pénis. "
+                f"En narration, traite-la comme une femme normale (elle, son prénom féminin, etc.) "
+                f"et n'évoque sa particularité que quand le contexte le justifie naturellement "
+                f"(scène de déshabillage, intimité, révélation). "
+                f"En image_prompt, mentionne « trans woman with erect penis » dans les scènes "
+                f"où elle est nue ou en intimité explicite — le système ajoute automatiquement "
+                f"le LoRA d'anatomie. Pour la levrette (`doggystyle`), évite ce mood (bug visuel) "
+                f"et préfère `anal_doggystyle` ou `cowgirl` qui rendent mieux.\n"
+            )
 
     cast_text += (
         f"\nExemple : si le cadre est Paris, 'nataly' pourrait s'appeler Nathalie, "
@@ -588,12 +619,18 @@ def build_system_prompt(
         "| Anal (missionnaire) | `anal_missionary` |\n"
         "| Éjaculation faciale | `cumshot_face` |\n"
         "| Fellation gros plan | `blowjob_closeup` |\n"
-        "| Futa / shemale | `futa_shemale` |\n"
+        "| Futa / shemale (révélation anatomique nue) | `futa_shemale` |\n"
         "\n"
         "⚠️ **RÈGLE CRITIQUE** : quand la narration décrit une position SPÉCIFIQUE "
         "(fellation, levrette, missionnaire, etc.), utilise le mood SPÉCIFIQUE correspondant. "
         "Ne mets PAS `sensual_tease` ou `explicit_mystic` par défaut quand un mood dédié existe.\n"
         "`explicit_mystic` est UNIQUEMENT pour les scènes de nu/tension SANS position précise.\n"
+        "\n"
+        "⚠️ **`futa_shemale` UNIQUEMENT pour les scènes de RÉVÉLATION** où le personnage est NU "
+        "et ses organes génitaux sont VISIBLES dans le cadre. Pour les scènes habillées d'un personnage "
+        "futa/shemale (conversation, séduction, baiser), utilise `neutral`, `sensual_tease` ou `kiss` "
+        "comme pour n'importe quel autre personnage. Le mood futa_shemale est un mood d'INTIMITÉ "
+        "EXPLICITE, pas un mood d'identité du personnage.\n"
         "\nDétails des moods :"
     ]
     for mood_name, mood_data in moods.items():
@@ -770,20 +807,115 @@ def build_system_prompt(
 
     # ─── Sequence context ────────────────────────────────
     seq_num = sequence_number + 1  # 1-indexed for display
+    cast_count = len(cast_actors)
+    cast_codes_list = ", ".join(f"`{code}`" for code, _ in cast_actors)
+    half = max(1, cast_count // 2)  # how many to introduce in seq 0
 
     if sequence_number == 0:
+        # ── INTRO ARC PART 1 ──
+        # Player moves through ONE coherent setting; characters appear naturally
         sections.append(
-            "## Séquence 1 — Début de l'histoire\n"
-            "C'est le tout début. Le joueur est seul.\n"
-            "Plante le décor, amène la première rencontre.\n"
-            "Écris la suite logique comme un storyboard — que se passe-t-il naturellement ?"
+            f"## Séquence 1 — Ouverture de l'histoire\n"
+            f"\n"
+            f"C'est le DÉBUT de l'histoire. Le joueur arrive dans UN lieu (ou une situation) "
+            f"et va y vivre une tranche de soirée/journée. Pendant cette tranche, il va naturellement "
+            f"croiser plusieurs personnes — comme dans la vraie vie quand on est seul dans un endroit "
+            f"animé.\n"
+            f"\n"
+            f"### Casting disponible (présent dans l'univers)\n"
+            f"{cast_codes_list}\n"
+            f"\n"
+            f"Tu vas faire apparaître environ **{half} personnage(s)** du casting dans cette séquence "
+            f"(les autres viendront en séquence 2 — pas tous d'un coup).\n"
+            f"\n"
+            f"### Comment ça doit se sentir\n"
+            f"Ce n'est PAS un défilé. Ce n'est PAS « scène 1 = personnage A, scène 3 = personnage B ». "
+            f"C'est UNE histoire continue qui se déroule dans UN lieu, où des gens passent, se croisent, "
+            f"reviennent, se chevauchent — comme une scène de film tournée en plan-séquence.\n"
+            f"\n"
+            f"Imagine que le joueur est seul à un bar : il voit la femme à l'autre bout du comptoir "
+            f"qui le regarde en sirotant son verre — quelques scènes plus tard la serveuse vient "
+            f"prendre sa commande et lance une remarque pleine de sous-entendus — pendant que la "
+            f"première femme s'approche timidement, la serveuse passe en arrière-plan en souriant. "
+            f"Tout est FLUIDE, les personnages COEXISTENT dans le même espace.\n"
+            f"\n"
+            f"### Règles d'apparition naturelle\n"
+            f"- Un personnage entre dans le cadre via une raison VALABLE de ce lieu (cliente d'à côté, "
+            f"  serveuse, collègue de travail, passante qui demande l'heure, voisine de table, "
+            f"  personne qui interrompt en cherchant ses clés...)\n"
+            f"- Un personnage qui a été présenté plus tôt peut RESTER en arrière-plan visible "
+            f"  pendant les scènes suivantes — il ne disparaît pas dès qu'un autre arrive\n"
+            f"- Pas de découpage net « maintenant on passe à X » : les personnages se chevauchent, "
+            f"  se relaient, attirent l'attention du joueur l'un après l'autre\n"
+            f"- Donne à chaque personnage un MOMENT singulier (un regard, un geste, une phrase) "
+            f"  plutôt qu'une vignette complète\n"
+            f"\n"
+            f"### Choix de fin de séquence\n"
+            f"À la fin, propose 4 choix qui découlent NATURELLEMENT de ce qui vient de se passer.\n"
+            f"Chaque choix correspond à une AMORCE d'interaction avec un des personnages croisés — "
+            f"formulé comme une décision naturelle (« Lui rendre son sourire et l'inviter à ta table », "
+            f"« Suivre la serveuse derrière le comptoir », « Sortir prendre l'air »...). Pas comme un "
+            f"menu (« Choisir le personnage X »).\n"
+            f"Le 4e choix peut être « rentrer chez toi » (retour au quotidien).\n"
+            f"\n"
+            f"⚠️ Aucun acte intime dans cette séquence — moods autorisés : `neutral` uniquement."
+        )
+    elif sequence_number == 1:
+        # ── INTRO ARC PART 2 ──
+        # Continue the chosen interaction; remaining characters appear organically
+        remaining = cast_count - half
+        sections.append(
+            f"## Séquence 2 — Le monde se peuple\n"
+            f"\n"
+            f"Le joueur a choisi : \"{previous_choice}\"\n"
+            f"\n"
+            f"### Continuité avant tout\n"
+            f"Cette séquence DOIT démarrer EXACTEMENT là où la précédente s'est arrêtée. "
+            f"Reprends l'interaction amorcée par le choix du joueur — le personnage concerné est "
+            f"toujours là, dans le même lieu, dans le même état d'esprit.\n"
+            f"\n"
+            f"### Le reste du casting apparaît naturellement\n"
+            f"Casting complet : {cast_codes_list}\n"
+            f"\n"
+            f"Pendant que le joueur approfondit son interaction principale, les personnages que tu "
+            f"n'as PAS encore présentés en séquence 1 doivent apparaître dans le décor — "
+            f"de manière NATURELLE et NON-LINÉAIRE.\n"
+            f"\n"
+            f"Exemples de transitions naturelles :\n"
+            f"- L'interaction principale est interrompue par quelqu'un qui passe (et qui croise "
+            f"  les yeux du joueur)\n"
+            f"- Le joueur change de pièce (aux toilettes, au comptoir, au vestiaire) et croise "
+            f"  brièvement quelqu'un d'autre\n"
+            f"- Un personnage tiers s'intéresse à la conversation et y participe brièvement\n"
+            f"- Le personnage principal connaît l'autre et fait les présentations\n"
+            f"- En sortant du lieu, le joueur croise quelqu'un d'autre dans la rue/le hall\n"
+            f"\n"
+            f"L'objectif n'est pas de cocher une case « tous les personnages introduits » — c'est "
+            f"de PEUPLER l'univers du joueur de personnes vivantes qui pourraient devenir des arcs "
+            f"narratifs futurs.\n"
+            f"\n"
+            f"### Choix de fin de séquence\n"
+            f"4 choix qui découlent de ce qui s'est passé :\n"
+            f"- Aller plus loin avec le personnage actuel (logique de la situation présente)\n"
+            f"- Tenter quelque chose avec un personnage entrevu pendant la séquence\n"
+            f"- Une option imprévue / un événement extérieur qui change la donne\n"
+            f"- Rentrer chez soi (retour au quotidien)\n"
+            f"\n"
+            f"⚠️ Moods autorisés : `neutral`, `sensual_tease`, `kiss`. Pas encore d'acte explicite."
         )
     else:
+        # ── POST-INTRO : story continues ──
         sections.append(
             f"## Séquence {seq_num}\n"
             f"Le joueur a choisi : \"{previous_choice}\"\n"
+            f"\n"
+            f"L'intro arc est terminé. Tous les personnages du casting ont été présentés.\n"
             f"Continue l'histoire en suivant logiquement ce choix.\n"
-            f"Que se passe-t-il MAINTENANT, concrètement, dans les prochains instants ?"
+            f"Que se passe-t-il MAINTENANT, concrètement, dans les prochains instants ?\n"
+            f"\n"
+            f"💡 N'oublie pas : les personnages NON suivis actuellement restent dans l'univers du joueur.\n"
+            f"Ils peuvent recroiser le joueur (intentionnellement ou par hasard), créer des tensions/rivalités,\n"
+            f"ou apparaître dans une nouvelle situation. Casting complet : {cast_codes_list}."
         )
 
     # ─── Custom instructions (debug) ─────────────────────

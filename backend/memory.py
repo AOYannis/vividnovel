@@ -42,9 +42,15 @@ def _persistent_user_id(user_id: str, setting: str = "") -> str:
     return "gbp" + hashlib.md5(raw.encode()).hexdigest()[:12]
 
 
-def _character_memory_id(session_id: str, character_code: str) -> str:
-    """Per-character memory scope within a session."""
-    raw = f"{session_id}:char:{character_code}"
+def _character_memory_id(user_id: str, character_code: str, setting: str = "") -> str:
+    """Per-character memory scope.
+
+    Scoped on (user_id + character_code + setting), NOT on session_id.
+    Same user + same character + same setting = shared memories across sessions,
+    so the character truly "remembers" the player even when starting a new story.
+    Different setting = separate namespace (Camille in 2026 Paris ≠ Camille in 2100 Neo-Tokyo).
+    """
+    raw = f"{user_id}:{setting}:char:{character_code}"
     return "gbc" + hashlib.md5(raw.encode()).hexdigest()[:12]
 
 
@@ -56,6 +62,7 @@ def store_sequence_narrative(
     choice_made: str | None,
     setting_label: str = "",
     characters: list[str] | None = None,
+    setting_id: str = "",
 ) -> None:
     """Extract and store narrative facts from a completed sequence.
 
@@ -86,7 +93,7 @@ def store_sequence_narrative(
         # so they "remember" what happened when they were present
         if characters and narration_text:
             for char_code in characters:
-                char_uid = _character_memory_id(session_id, char_code)
+                char_uid = _character_memory_id(user_id, char_code, setting_id)
                 _client.add(
                     messages=[{"role": "user", "content": (
                         f"During a scene with the player, this happened: "
@@ -106,19 +113,22 @@ def store_sequence_narrative(
 
 
 def store_character_chat(
-    session_id: str,
+    user_id: str,
     character_code: str,
     player_message: str,
     narrator_response: str,
+    setting_id: str = "",
 ) -> None:
     """Store a scene chat exchange in a character's memory.
 
     This makes the character "remember" what the player said/did.
+    Memory is scoped on user+character+setting (not session) so it persists
+    across stories.
     """
     if not _client:
         return
     try:
-        char_uid = _character_memory_id(session_id, character_code)
+        char_uid = _character_memory_id(user_id, character_code, setting_id)
         _client.add(
             messages=[{"role": "user", "content": (
                 f"The player said/did: \"{player_message}\". "
@@ -131,18 +141,20 @@ def store_character_chat(
 
 
 def recall_character_memory(
-    session_id: str,
+    user_id: str,
     character_code: str,
     limit: int = 10,
+    setting_id: str = "",
 ) -> str:
     """Recall what a character remembers about interactions with the player.
 
+    Memory is scoped on user+character+setting so it persists across stories.
     Returns formatted string, or empty string.
     """
     if not _client:
         return ""
     try:
-        char_uid = _character_memory_id(session_id, character_code)
+        char_uid = _character_memory_id(user_id, character_code, setting_id)
         memories = _client.search(
             query="what does the character know about the player, conversations, revelations, shared moments",
             filters={"user_id": char_uid},

@@ -85,6 +85,7 @@ class StartGameRequest(BaseModel):
     player: PlayerProfile
     setting: str  # "paris_2026" | "paris_1800" | "neo_2100" | "custom"
     actors: list[str]  # ordered list of actor codenames (priority of encounter)
+    actor_genders: Optional[dict[str, str]] = None  # {codename: "female" | "trans"} — defaults to female
     custom_setting: Optional[str] = None  # user-defined setting description
     system_prompt_override: Optional[str] = None
     style_moods: Optional[dict] = None  # custom mood → LoRA mapping
@@ -211,7 +212,10 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
     if len(req.actors) != len(set(req.actors)):
         raise HTTPException(400, "Duplicate actors not allowed")
 
-    cast = {"actors": req.actors}
+    cast = {
+        "actors": req.actors,
+        "actor_genders": req.actor_genders or {},  # {code: "female" | "trans"}
+    }
     session_id = str(uuid.uuid4())
     session = GameSession(
         session_id=session_id,
@@ -328,7 +332,7 @@ async def scene_chat(req: SceneChatRequest, user: dict = Depends(get_current_use
                 for char_code in req.actors_present:
                     try:
                         char_mem = await asyncio.get_event_loop().run_in_executor(
-                            None, lambda c=char_code: recall_character_memory(session.id, c)
+                            None, lambda c=char_code: recall_character_memory(session.user_id, c, setting_id=session.setting)
                         )
                         if char_mem:
                             char_context += f"\nCe que {char_code} sait sur le joueur :\n{char_mem}\n"
@@ -461,11 +465,12 @@ async def scene_chat(req: SceneChatRequest, user: dict = Depends(get_current_use
                 import asyncio
                 _msg = req.message
                 _resp = narration_text
-                _sid = session.id
+                _uid = session.user_id
+                _setting = session.setting
                 _actors = list(req.actors_present)
                 def _store_chat():
                     for char_code in _actors:
-                        store_character_chat(_sid, char_code, _msg, _resp)
+                        store_character_chat(_uid, char_code, _msg, _resp, setting_id=_setting)
                 asyncio.get_event_loop().run_in_executor(None, _store_chat)
 
             chat_log.finish()
@@ -508,7 +513,7 @@ async def phone_chat(req: PhoneChatRequest, user: dict = Depends(get_current_use
         import asyncio
         try:
             char_context = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: recall_character_memory(session.id, req.character_code)
+                None, lambda: recall_character_memory(session.user_id, req.character_code, setting_id=session.setting)
             )
         except Exception:
             pass
@@ -646,12 +651,13 @@ async def phone_chat(req: PhoneChatRequest, user: dict = Depends(get_current_use
             # Store in character memory
             if MEM0_ENABLED:
                 import asyncio
-                _sid = session.id
+                _uid = session.user_id
+                _setting = session.setting
                 _char = req.character_code
                 _msg = req.message
                 _resp = message_text
                 asyncio.get_event_loop().run_in_executor(
-                    None, lambda: store_character_chat(_sid, _char, f"[phone] {_msg}", _resp)
+                    None, lambda: store_character_chat(_uid, _char, f"[phone] {_msg}", _resp, setting_id=_setting)
                 )
 
             chat_log.finish()
@@ -1267,14 +1273,40 @@ async def resume_session(session_id: str, user: dict = Depends(get_current_user)
     session.consistency.props = cs.get("props", [])
     session.consistency.prompt_overrides = {int(k): v for k, v in cs.get("prompt_overrides", {}).items()}
     session.consistency.secondary_characters = cs.get("secondary_characters", {})
+    session.consistency.character_actors = cs.get("character_actors", {})
 
     sessions[session_id] = session
+
+    # Derive met_characters + character_names from history (for the phone UI)
+    met_characters: list[str] = []
+    character_names: dict[str, str] = {}
+    try:
+        history = await db.load_sequence_history(session_id)
+        for seq in history:
+            for img in seq.get("images") or []:
+                for actor in img.get("actors_present") or []:
+                    if actor and actor not in met_characters:
+                        met_characters.append(actor)
+        # Invert the locked character_actors mapping (display_name → code) to get (code → display_name)
+        for display_name, actor_code in session.consistency.character_actors.items():
+            character_names[actor_code] = display_name
+    except Exception:
+        pass
+
+    # Fallback: if history yielded no met_characters (old sessions saved before
+    # actors_present was persisted), assume the cast members ARE the met characters.
+    # This is a reasonable assumption since the cast is what the player chose to interact with.
+    if not met_characters:
+        met_characters = list(session.cast.get("actors", []) or [])
+
     return {
         "session_id": session_id,
         "sequence_number": session.sequence_number,
         "player": session.player,
         "setting": session.setting,
         "cast": session.cast,
+        "met_characters": met_characters,
+        "character_names": character_names,
     }
 
 

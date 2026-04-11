@@ -146,7 +146,9 @@ ACTOR_REGISTRY = {
         "lora_id": None,
         "trigger_word": None,
         "default_weight": 0,
-        "description": "Ciri from The Witcher 3 video game, young woman in her early 20s, ashen platinum-blonde hair in a short messy bob, striking emerald-green eyes, fair skin, athletic slim build, sharp angular features, confident fierce expression",
+        # Description shown to the agent — generic physical traits only, no source reference
+        "description": "Young woman early 20s, ashen platinum-blonde short messy bob, striking emerald-green eyes, fair skin, athletic slim build, sharp angular features, confident fierce expression",
+        # Prompt prefix for the IMAGE model — keeps the source reference because Z-Image needs it to render the look
         "prompt_prefix": "Ciri from The Witcher 3 video game, young woman early 20s, ashen platinum-blonde short messy bob hair, striking emerald-green eyes, fair skin, athletic slim build, sharp angular features, confident fierce expression",
     },
     "yennefer": {
@@ -154,7 +156,7 @@ ACTOR_REGISTRY = {
         "lora_id": None,
         "trigger_word": None,
         "default_weight": 0,
-        "description": "Yennefer of Vengerberg from The Witcher 3 video game, woman in her late 20s, long raven-black curly hair, piercing violet eyes, pale porcelain skin, elegant hourglass figure, aristocratic features, mysterious alluring gaze",
+        "description": "Woman late 20s, long raven-black curly hair, piercing violet eyes, pale porcelain skin, elegant hourglass figure, aristocratic features, mysterious alluring gaze",
         "prompt_prefix": "Yennefer of Vengerberg from The Witcher 3 video game, woman late 20s, long raven-black curly hair, piercing violet eyes, pale porcelain skin, elegant hourglass figure, aristocratic features, mysterious alluring gaze",
     },
     "custom": {
@@ -556,16 +558,21 @@ DEFAULT_STYLE_MOODS = {
         "steps": 14,
     },
     "futa_shemale": {
-        "description": "Futa / shemale — lorsque le personnage est une futa / shemale / transsexuelle, toujours décrire plusieurs fois le pénis en détail",
+        "description": (
+            "Futa / shemale RÉVÉLATION ANATOMIQUE — UNIQUEMENT pour les scènes où le personnage "
+            "est NU OU partiellement déshabillé ET ses organes génitaux sont VISIBLES dans le cadre. "
+            "NE PAS utiliser pour des scènes habillées, même suggestives — utiliser `sensual_tease` "
+            "ou `kiss` à la place jusqu'au moment de la révélation. Stacke avec le LoRA du personnage "
+            "pour préserver son apparence."
+        ),
         "lora": {"id": "warmline:202603170004@1", "name": "ZTurbo Pen V3", "weight": 1.0},
         "prompt_block": (
-            "POV first-person from below, white shemale lifting skirt to show big erect penis visible between legs, "
-            "no panties, close-up of crotch and thighs, indoor bedroom background, "
-            "detailed veins on penis, high detail glans anatomy"
+            "anatomical reveal moment, character is nude or partially undressed with genital area visible in frame, "
+            "erect penis prominently displayed, detailed veins and glans anatomy, "
+            "natural skin tones, photorealistic anatomy, intimate framing focused on the reveal"
         ),
         "example": (
-            "POV worm’s-eye close-up: skirt hem lifted with one hand, thighs and shaft in frame, "
-            "neutral wall behind, clinical sharp focus"
+            "She lifts her dress hem, revealing her erect penis between her thighs, intimate bedroom lighting"
         ),
         "cfg": 1,
         "steps": 15,

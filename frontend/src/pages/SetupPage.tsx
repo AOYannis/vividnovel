@@ -5,6 +5,7 @@ import { useT, useI18n, UI_LANGUAGES } from '../i18n'
 import { fetchActors, fetchSettings, startGame, fetchAvailableLoras, fetchDefaultStyleMoods, fetchGrokModels, fetchLanguages, previewSystemPrompt, listSessions, resumeSession, deleteSession, getSessionHistory, clearAllMemories } from '../api/client'
 import type { Actor, Setting, LoraInfo, GrokModel } from '../api/types'
 import ProfileModal from '../components/ProfileModal'
+import Phone from '../components/game/Phone'
 import { loadProfile, hasProfile } from '../lib/profile'
 
 type SetupStep = 'home' | 'player' | 'setting' | 'cast' | 'prompt'
@@ -17,6 +18,9 @@ export default function SetupPage() {
   const [showDebug, setShowDebug] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
   const [showAdvancedPrompt, setShowAdvancedPrompt] = useState(false)
+  const [showHomePhone, setShowHomePhone] = useState(false)
+  const [openingPhone, setOpeningPhone] = useState(false)
+  const [phoneSession, setPhoneSession] = useState<{ id: string; player_name: string; setting: string } | null>(null)
   const [allLoras, setAllLoras] = useState<LoraInfo[]>([])
   const [actors, setActors] = useState<Actor[]>([])
   const [settings, setSettings] = useState<Setting[]>([])
@@ -57,6 +61,7 @@ export default function SetupPage() {
 
   // Cast
   const [selectedActors, setSelectedActors] = useState<string[]>([])
+  const [actorGenders, setActorGenders] = useState<Record<string, string>>({})  // codename -> 'female' | 'trans'
   const [customCharacterDesc, setCustomCharacterDesc] = useState('')
 
   // System prompt
@@ -164,12 +169,60 @@ export default function SetupPage() {
         data.session_id,
         data.sequence_number || 0,
         historyData.sequences || [],
+        data.met_characters || [],
+        data.character_names || {},
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resume')
     } finally {
       setResuming(null)
     }
+  }
+
+  /** Open the phone for a saved session WITHOUT starting/resuming it.
+   * Loads met_characters + character_names into the store and opens the phone overlay. */
+  const openPhoneForSession = async (sessionId: string) => {
+    setOpeningPhone(true)
+    try {
+      const [data, historyData] = await Promise.all([
+        resumeSession(sessionId),
+        getSessionHistory(sessionId),
+      ])
+      // Push minimal session data into the store so Phone can use it.
+      // We DO NOT call store.resumeSession (which sets step='choosing') —
+      // we want to stay on the home page. We just inject the phone-relevant fields.
+      const derivedMet: Set<string> = new Set(data.met_characters || [])
+      for (const seq of (historyData.sequences || [])) {
+        for (const img of seq.images || []) {
+          for (const a of (img as any).actors_present || []) {
+            if (a) derivedMet.add(a)
+          }
+        }
+      }
+      useGameStore.setState({
+        sessionId: data.session_id,
+        metCharacters: Array.from(derivedMet),
+        characterNames: data.character_names || {},
+        phoneOpen: true,
+      })
+      setPhoneSession({
+        id: sessionId,
+        player_name: data.player?.name || 'Anonyme',
+        setting: data.setting === 'custom' ? 'Custom' : (data.setting || ''),
+      })
+      setShowHomePhone(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open phone')
+    } finally {
+      setOpeningPhone(false)
+    }
+  }
+
+  const handleOpenPhoneFromHome = () => {
+    // Default to the most recent session
+    if (savedSessions.length === 0) return
+    const latest = savedSessions[0]
+    openPhoneForSession(latest.id)
   }
 
   const toggleActor = (codename: string) => {
@@ -227,6 +280,7 @@ export default function SetupPage() {
         player,
         setting: store.setting,
         actors: selectedActors,
+        actor_genders: Object.keys(actorGenders).length > 0 ? actorGenders : undefined,
         custom_setting: store.setting === 'custom' ? customSetting : undefined,
         system_prompt_override: promptEdited ? systemPrompt : undefined,
         style_moods: moodsLoaded ? styleMoods : undefined,
@@ -326,7 +380,7 @@ export default function SetupPage() {
 
   return (
     <div className="min-h-[100dvh] bg-neutral-950 px-4 py-6 md:px-8 md:py-12">
-      {/* Profile / Language pill — top left */}
+      {/* Profile + Phone pill — top left */}
       <div className="fixed top-4 left-4 z-50 flex gap-2 items-center">
         <button
           onClick={() => setShowProfileModal(true)}
@@ -338,43 +392,21 @@ export default function SetupPage() {
           </svg>
           <span className="hidden sm:inline">{loadProfile().name || t('profile.set_up')}</span>
         </button>
+        {/* Phone — only enabled if there's at least one saved session */}
+        {savedSessions.length > 0 && (
+          <button
+            onClick={handleOpenPhoneFromHome}
+            disabled={openingPhone}
+            className="flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 transition-colors text-xs backdrop-blur-sm disabled:opacity-50"
+            title="Phone"
+          >
+            <span>📱</span>
+            <span className="hidden sm:inline">Phone</span>
+          </button>
+        )}
       </div>
 
-      {/* Top right controls */}
-      <div className="fixed top-4 right-4 z-50 flex gap-2">
-        <button
-          onClick={() => store.openPlayground()}
-          className="text-xs px-3 py-2 md:py-1.5 min-h-[40px] md:min-h-0 rounded-lg bg-amber-950 text-amber-400 hover:text-amber-300 transition-colors"
-        >
-          Playground
-        </button>
-        {useAuthStore.getState().isAdmin && (
-          <button
-            onClick={() => store.openAdmin()}
-            className="text-xs px-3 py-2 md:py-1.5 min-h-[40px] md:min-h-0 rounded-lg bg-red-950 text-red-400 hover:text-red-300 transition-colors"
-          >
-            Admin
-          </button>
-        )}
-        {useAuthStore.getState().enabled && (
-          <button
-            onClick={() => useAuthStore.getState().signOut()}
-            className="text-xs px-3 py-2 md:py-1.5 min-h-[40px] md:min-h-0 rounded-lg bg-neutral-900 text-neutral-500 hover:text-neutral-300 transition-colors"
-          >
-            Logout
-          </button>
-        )}
-        <button
-          onClick={() => setShowDebug(!showDebug)}
-          className={`text-xs px-3 py-2 md:py-1.5 min-h-[40px] md:min-h-0 rounded-lg transition-colors ${
-            showDebug
-              ? 'bg-indigo-900 text-indigo-300'
-              : 'bg-neutral-900 text-neutral-500 hover:text-neutral-300'
-          }`}
-        >
-          Debug
-        </button>
-      </div>
+      {/* Top right: empty (controls moved into profile menu) */}
 
       {/* Debug panel (slide-in from right) */}
       {showDebug && (
@@ -807,25 +839,54 @@ export default function SetupPage() {
             <div className="grid grid-cols-2 gap-3">
               {actors.map((actor) => {
                 const selected = selectedActors.includes(actor.codename)
-                const order = selectedActors.indexOf(actor.codename)
+                const isTrans = actorGenders[actor.codename] === 'trans'
                 return (
-                  <button
+                  <div
                     key={actor.codename}
-                    onClick={() => toggleActor(actor.codename)}
                     className={`relative p-5 md:p-4 rounded-xl border text-left transition-all min-h-[80px] ${
                       selected
-                        ? 'border-purple-500 bg-purple-950/40'
+                        ? isTrans
+                          ? 'border-pink-500 bg-pink-950/30'
+                          : 'border-purple-500 bg-purple-950/40'
                         : 'border-neutral-800 bg-neutral-900 hover:border-neutral-700'
                     }`}
                   >
+                    <button
+                      onClick={() => toggleActor(actor.codename)}
+                      className="block w-full text-left"
+                    >
+                      {selected && (
+                        <span className={`absolute top-2 right-2 text-white text-xs w-6 h-6 md:w-5 md:h-5 rounded-full flex items-center justify-center ${
+                          isTrans ? 'bg-pink-600' : 'bg-purple-600'
+                        }`}>
+                          ✓
+                        </span>
+                      )}
+                      <div className="font-semibold text-neutral-100 text-base md:text-sm">{actor.display_name}</div>
+                      <div className="text-sm md:text-xs text-neutral-400 mt-1">{actor.description}</div>
+                    </button>
+                    {/* Gender toggle — only when actor is selected */}
                     {selected && (
-                      <span className="absolute top-2 right-2 bg-purple-600 text-white text-xs w-6 h-6 md:w-5 md:h-5 rounded-full flex items-center justify-center">
-                        {order + 1}
-                      </span>
+                      <div className="flex gap-1 mt-2 bg-black/30 rounded-full p-0.5 w-fit" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => setActorGenders((prev) => { const n = { ...prev }; delete n[actor.codename]; return n })}
+                          className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                            !isTrans ? 'bg-purple-600 text-white' : 'text-neutral-500 hover:text-neutral-300'
+                          }`}
+                        >
+                          ♀
+                        </button>
+                        <button
+                          onClick={() => setActorGenders((prev) => ({ ...prev, [actor.codename]: 'trans' }))}
+                          className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                            isTrans ? 'bg-pink-600 text-white' : 'text-neutral-500 hover:text-neutral-300'
+                          }`}
+                        >
+                          ⚧ trans
+                        </button>
+                      </div>
                     )}
-                    <div className="font-semibold text-neutral-100 text-base md:text-sm">{actor.display_name}</div>
-                    <div className="text-sm md:text-xs text-neutral-400 mt-1">{actor.description}</div>
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -1257,7 +1318,26 @@ export default function SetupPage() {
       <ProfileModal
         open={showProfileModal}
         onClose={() => setShowProfileModal(false)}
+        onOpenDebug={() => setShowDebug(true)}
       />
+
+      {/* Phone overlay (from home) */}
+      {showHomePhone && (
+        <Phone
+          sessionSwitcher={{
+            sessions: savedSessions.map((s) => ({
+              id: s.id,
+              label: `${s.player?.name || 'Anonyme'} — ${s.setting === 'custom' ? 'Custom' : s.setting?.replace('_', ' ')}`,
+            })),
+            current: phoneSession?.id || null,
+            onSwitch: (id) => openPhoneForSession(id),
+          }}
+          onCloseAll={() => {
+            setShowHomePhone(false)
+            useGameStore.setState({ phoneOpen: false, sessionId: null, metCharacters: [], characterNames: {} })
+          }}
+        />
+      )}
     </div>
   )
 }

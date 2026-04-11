@@ -113,6 +113,7 @@ export async function startGame(params: {
   player: { name: string; age: number; gender: string; preferences: string }
   setting: string
   actors: string[]
+  actor_genders?: Record<string, string>
   custom_setting?: string
   system_prompt_override?: string
   style_moods?: Record<string, any>

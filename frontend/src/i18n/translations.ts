@@ -56,7 +56,7 @@ const translations: Record<string, Record<string, string>> = {
 
     // Setup - step 3: cast
     'setup.step3.title': 'Casting',
-    'setup.step3.subtitle': 'Choisis 1 ou 2 personnages',
+    'setup.step3.subtitle': 'Choisis 2 a 4 personnages — tu les rencontreras tous dans les premieres sequences',
     'setup.step3.custom_label': 'Decris ton personnage custom',
     'setup.step3.custom_placeholder': 'Ex: Young redhead woman, early 20s, freckled pale skin...',
     'setup.step3.custom_hint': 'Cette description sera utilisee dans les prompts image. Sois precis sur l\'apparence physique.',
@@ -194,7 +194,7 @@ const translations: Record<string, Record<string, string>> = {
     'setting.neo_2100.desc': 'Futuristic megacity — neon lights, holograms, cyberpunk clubs',
 
     'setup.step3.title': 'Casting',
-    'setup.step3.subtitle': 'Choose 1 or 2 characters',
+    'setup.step3.subtitle': 'Pick 2 to 4 characters — you will meet all of them in the first sequences',
     'setup.step3.custom_label': 'Describe your custom character',
     'setup.step3.custom_placeholder': 'E.g.: Young redhead woman, early 20s, freckled pale skin...',
     'setup.step3.custom_hint': 'This description will be used in image prompts. Be specific about physical appearance.',

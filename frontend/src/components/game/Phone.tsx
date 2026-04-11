@@ -31,11 +31,23 @@ function RelationshipBadge({ level, encounters }: { level: number; encounters: n
   )
 }
 
-export default function Phone() {
+interface PhoneProps {
+  /** When provided, shows a session switcher (used when phone is opened from the home page) */
+  sessionSwitcher?: {
+    sessions: { id: string; label: string }[]
+    current: string | null
+    onSwitch: (sessionId: string) => void
+  }
+  /** Override the default close behavior — used by the home page to also unmount the overlay */
+  onCloseAll?: () => void
+}
+
+export default function Phone({ sessionSwitcher, onCloseAll }: PhoneProps = {}) {
   const t = useT()
   const {
     phoneOpen, phoneActiveChar, phoneChats, metCharacters, sessionId, characterNames, relationships,
   } = useGameStore()
+  const [showSwitcher, setShowSwitcher] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [streamingText, setStreamingText] = useState('')
@@ -107,8 +119,16 @@ export default function Phone() {
     }
   }
 
+  const handleClose = () => {
+    if (onCloseAll) {
+      onCloseAll()
+    } else {
+      setPhoneOpen(false)
+    }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setPhoneOpen(false)}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={handleClose}>
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
@@ -230,8 +250,38 @@ export default function Phone() {
         ) : (
           /* ── Contact list ── */
           <>
-            <div className="px-4 py-3 border-b border-neutral-800">
-              <h2 className="text-sm font-medium text-neutral-300">Messages</h2>
+            <div className="px-4 py-3 border-b border-neutral-800 relative">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-medium text-neutral-300">Messages</h2>
+                {sessionSwitcher && sessionSwitcher.sessions.length > 1 && (
+                  <button
+                    onClick={() => setShowSwitcher(!showSwitcher)}
+                    className="text-[10px] text-neutral-500 hover:text-neutral-200 transition-colors flex items-center gap-1"
+                  >
+                    {sessionSwitcher.sessions.find((s) => s.id === sessionSwitcher.current)?.label?.slice(0, 24) || 'Switch story'}
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {showSwitcher && sessionSwitcher && (
+                <div className="absolute top-full right-2 mt-1 z-10 bg-neutral-900 border border-neutral-800 rounded-lg shadow-2xl py-1 max-w-[280px] max-h-[60vh] overflow-y-auto">
+                  {sessionSwitcher.sessions.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => { sessionSwitcher.onSwitch(s.id); setShowSwitcher(false) }}
+                      className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                        s.id === sessionSwitcher.current
+                          ? 'bg-indigo-950/50 text-indigo-300'
+                          : 'text-neutral-300 hover:bg-neutral-800'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto">
               {metCharacters.length === 0 ? (

@@ -1,17 +1,24 @@
 import { useState, useEffect } from 'react'
 import { type UserProfile, loadProfile, saveProfile } from '../lib/profile'
 import { useT, useI18n, UI_LANGUAGES } from '../i18n'
+import { useAuthStore } from '../stores/authStore'
+import { useGameStore } from '../stores/gameStore'
 
 interface ProfileModalProps {
   open: boolean
   onClose: () => void
   onSave?: (profile: UserProfile) => void
+  onOpenDebug?: () => void
 }
 
-export default function ProfileModal({ open, onClose, onSave }: ProfileModalProps) {
+export default function ProfileModal({ open, onClose, onSave, onOpenDebug }: ProfileModalProps) {
   const t = useT()
   const { setLocale } = useI18n()
   const [profile, setProfile] = useState<UserProfile>(loadProfile())
+  const isAdmin = useAuthStore((s) => s.isAdmin)
+  const authEnabled = useAuthStore((s) => s.enabled)
+  const openPlayground = useGameStore((s) => s.openPlayground)
+  const openAdmin = useGameStore((s) => s.openAdmin)
 
   // Reload from storage every time the modal opens
   useEffect(() => {
@@ -132,6 +139,43 @@ export default function ProfileModal({ open, onClose, onSave }: ProfileModalProp
                   {lang.label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* App actions */}
+          <div className="pt-4 border-t border-neutral-800/60 space-y-2">
+            <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">App</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { onClose(); openPlayground() }}
+                className="text-xs px-3 py-2.5 rounded-lg bg-amber-950 text-amber-400 hover:text-amber-300 transition-colors text-left"
+              >
+                🎨 Playground
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => { onClose(); openAdmin() }}
+                  className="text-xs px-3 py-2.5 rounded-lg bg-red-950 text-red-400 hover:text-red-300 transition-colors text-left"
+                >
+                  🛠 Admin
+                </button>
+              )}
+              {onOpenDebug && (
+                <button
+                  onClick={() => { onClose(); onOpenDebug() }}
+                  className="text-xs px-3 py-2.5 rounded-lg bg-neutral-900 text-neutral-400 hover:text-neutral-200 transition-colors text-left"
+                >
+                  🔧 Debug
+                </button>
+              )}
+              {authEnabled && (
+                <button
+                  onClick={() => { onClose(); useAuthStore.getState().signOut() }}
+                  className="text-xs px-3 py-2.5 rounded-lg bg-neutral-900 text-neutral-400 hover:text-neutral-200 transition-colors text-left"
+                >
+                  ↪ Logout
+                </button>
+              )}
             </div>
           </div>
         </div>
