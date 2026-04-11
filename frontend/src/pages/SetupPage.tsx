@@ -807,7 +807,6 @@ export default function SetupPage() {
             <div className="grid grid-cols-2 gap-3">
               {actors.map((actor) => {
                 const selected = selectedActors.includes(actor.codename)
-                const order = selectedActors.indexOf(actor.codename)
                 return (
                   <button
                     key={actor.codename}
@@ -820,7 +819,7 @@ export default function SetupPage() {
                   >
                     {selected && (
                       <span className="absolute top-2 right-2 bg-purple-600 text-white text-xs w-6 h-6 md:w-5 md:h-5 rounded-full flex items-center justify-center">
-                        {order + 1}
+                        ✓
                       </span>
                     )}
                     <div className="font-semibold text-neutral-100 text-base md:text-sm">{actor.display_name}</div>

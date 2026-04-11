@@ -137,6 +137,13 @@ def build_system_prompt(
         "Tu es un SCÉNARISTE. Tu décris un storyboard — une suite de plans de caméra\n"
         "qui racontent une VRAIE histoire, riche et immersive.\n"
         "\n"
+        "### Structure générale\n"
+        "L'histoire commence par un **INTRO ARC de 2 séquences** où le joueur rencontre\n"
+        "TOUS les personnages du casting (chacun avec un mini-arc, dans une situation distincte).\n"
+        "Après ces 2 séquences, le joueur a fait connaissance et choisit qui suivre — l'histoire\n"
+        "se poursuit librement avec ce personnage, mais les autres restent disponibles pour recroiser\n"
+        "le joueur, créer des tensions, ou ouvrir de nouveaux arcs en parallèle.\n"
+        "\n"
         "### Principes fondamentaux\n"
         "- Le joueur vit une AVENTURE — pas une course vers le sexe\n"
         "- Les personnages sont des VRAIES PERSONNES : ils ont une vie, des opinions,\n"
@@ -261,10 +268,11 @@ def build_system_prompt(
 
     cast_text = (
         f"## Casting\n"
-        f"{len(cast_actors)} personnage(s) dans le casting du joueur, classés par PRIORITÉ de rencontre.\n"
-        f"Le premier personnage est celui que le joueur rencontrera en PREMIER.\n"
-        f"Les suivants apparaissent NATURELLEMENT au fil de l'histoire — pas besoin de tous les montrer dès le début.\n"
-        f"Chaque personnage peut devenir principal ou rester secondaire selon les choix du joueur.\n\n"
+        f"{len(cast_actors)} personnage(s) dans le casting du joueur. Tous doivent être présentés au joueur "
+        f"dans les **2 premières séquences (intro arc)**, chacun avec un mini-arc narratif distinct.\n"
+        f"Aucun ordre de priorité — c'est le joueur qui décidera lequel suivre par ses choix.\n"
+        f"Après les séquences d'intro, les personnages non choisis restent disponibles : ils peuvent recroiser "
+        f"le joueur plus tard, dans les mêmes ou de nouvelles situations.\n\n"
         f"IMPORTANT : dans l'histoire, donne-leur un PRÉNOM crédible et adapté au cadre "
         f"(pas leur nom technique). Mais dans les appels generate_scene_image, "
         f"utilise TOUJOURS leur codename technique dans actors_present.\n"
@@ -770,20 +778,89 @@ def build_system_prompt(
 
     # ─── Sequence context ────────────────────────────────
     seq_num = sequence_number + 1  # 1-indexed for display
+    cast_count = len(cast_actors)
+    cast_codes_list = ", ".join(f"`{code}`" for code, _ in cast_actors)
+    half = max(1, cast_count // 2)  # how many to introduce in seq 0
 
     if sequence_number == 0:
+        # ── INTRO ARC PART 1 ──
+        # Player meets ~half the cast in distinct vignettes
         sections.append(
-            "## Séquence 1 — Début de l'histoire\n"
-            "C'est le tout début. Le joueur est seul.\n"
-            "Plante le décor, amène la première rencontre.\n"
-            "Écris la suite logique comme un storyboard — que se passe-t-il naturellement ?"
+            f"## Séquence 1 — INTRO ARC (partie 1/2)\n"
+            f"\n"
+            f"C'est le DÉBUT de l'histoire. Le joueur va rencontrer plusieurs personnages dans "
+            f"des situations distinctes.\n"
+            f"\n"
+            f"**Casting complet** : {cast_codes_list}\n"
+            f"\n"
+            f"### Mission de cette séquence\n"
+            f"Le joueur doit croiser **environ {half} personnage(s)** du casting "
+            f"(les autres seront introduits en séquence 2).\n"
+            f"Chaque personnage a un mini-arc dans cette séquence : un MOMENT, un échange, "
+            f"une amorce d'intérêt — pas une histoire complète.\n"
+            f"\n"
+            f"### Structure recommandée\n"
+            f"- Scènes 0-1 : plante le décor, le joueur arrive dans le lieu/situation initiale\n"
+            f"- Scènes 2-{IMAGES_PER_SEQUENCE - 2} : rencontres successives — chaque rencontre dure 2-3 scènes\n"
+            f"  et se passe dans un MICRO-LIEU différent (table de bar, terrasse, escalier, ascenseur...)\n"
+            f"  Donne à chaque personnage un trait distinctif, un dialogue mémorable, une situation unique\n"
+            f"- Scène {IMAGES_PER_SEQUENCE - 1} : le joueur fait une pause, réfléchit aux personnes croisées\n"
+            f"\n"
+            f"### Choix de fin de séquence\n"
+            f"À la fin, propose 4 choix qui correspondent chacun à **un personnage rencontré**.\n"
+            f"Chaque choix = « passer plus de temps avec X », formulé naturellement (pas comme un menu).\n"
+            f"Le 4e choix peut être « rentrer chez toi » (retour au quotidien) si seuls 3 personnages "
+            f"ont été introduits dans cette séquence.\n"
+            f"\n"
+            f"⚠️ Aucun acte intime dans cette séquence — moods autorisés : `neutral` uniquement."
+        )
+    elif sequence_number == 1:
+        # ── INTRO ARC PART 2 ──
+        # Continue with the chosen character + introduce the rest
+        remaining = cast_count - half
+        sections.append(
+            f"## Séquence 2 — INTRO ARC (partie 2/2)\n"
+            f"\n"
+            f"Le joueur a choisi : \"{previous_choice}\"\n"
+            f"\n"
+            f"### Mission de cette séquence\n"
+            f"Deux objectifs en parallèle :\n"
+            f"1. **Approfondir** la rencontre avec le personnage choisi (basé sur le choix ci-dessus)\n"
+            f"2. **Introduire les {remaining} personnage(s) restant(s)** du casting via croisement, "
+            f"interruption, ou rencontre fortuite\n"
+            f"\n"
+            f"Casting complet : {cast_codes_list}\n"
+            f"Liste les personnages que tu n'as PAS encore présentés en séquence 1 et fais-les apparaître "
+            f"naturellement (un nouveau personnage qui débarque, une serveuse qui prend la commande, "
+            f"un voisin de bar qui se mêle à la conversation, etc.).\n"
+            f"\n"
+            f"### Structure recommandée\n"
+            f"- Scènes 0-2 : continuité avec le personnage du choix précédent (intimité grandissante)\n"
+            f"- Scènes 3-5 : introduction des personnages restants par interruption/croisement\n"
+            f"- Scènes 6-{IMAGES_PER_SEQUENCE - 1} : retour au personnage principal OU bascule vers un autre\n"
+            f"\n"
+            f"### Choix de fin de séquence\n"
+            f"À la fin, propose 4 choix qui couvrent les options narratives :\n"
+            f"- Suivre le personnage actuel encore plus loin\n"
+            f"- Basculer vers un des personnages introduits dans cette séquence\n"
+            f"- Une option imprévue / situation extérieure\n"
+            f"- Retour au quotidien (le joueur fait une pause)\n"
+            f"\n"
+            f"⚠️ Moods autorisés : `neutral`, `sensual_tease`, `kiss`. Pas encore d'acte explicite."
         )
     else:
+        # ── POST-INTRO : story continues ──
         sections.append(
             f"## Séquence {seq_num}\n"
             f"Le joueur a choisi : \"{previous_choice}\"\n"
+            f"\n"
+            f"L'intro arc est terminé. Tous les personnages du casting ont été présentés.\n"
             f"Continue l'histoire en suivant logiquement ce choix.\n"
-            f"Que se passe-t-il MAINTENANT, concrètement, dans les prochains instants ?"
+            f"Que se passe-t-il MAINTENANT, concrètement, dans les prochains instants ?\n"
+            f"\n"
+            f"💡 N'oublie pas : les personnages NON suivis actuellement restent dans l'univers du joueur.\n"
+            f"Ils peuvent recroiser le joueur (intentionnellement ou par hasard), créer des tensions/rivalités,\n"
+            f"ou apparaître dans une nouvelle situation. Casting complet : {cast_codes_list}."
         )
 
     # ─── Custom instructions (debug) ─────────────────────

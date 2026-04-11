@@ -329,12 +329,17 @@ class StoryEngine:
                     ),
                 })
             else:
+                cast_codes_str = ", ".join(session.cast.get("actors", []))
                 messages.append({
                     "role": "user",
                     "content": (
-                        f"Commence l'histoire. Écris 1-2 phrases de narration pour la scène 0, "
-                        f"puis appelle generate_scene_image avec image_index=0. "
-                        f"Répète pour chaque scène jusqu'à {IMAGES_PER_SEQUENCE - 1}, puis provide_choices avec 4 choix."
+                        f"Commence l'histoire — c'est la SÉQUENCE 1 de l'INTRO ARC. "
+                        f"Le joueur va rencontrer plusieurs personnages du casting ({cast_codes_str}) "
+                        f"dans des situations distinctes (chacun a 2-3 scènes dédiées). "
+                        f"À la fin, propose 4 choix qui correspondent chacun à un personnage croisé. "
+                        f"\n\nÉcris 1-2 phrases pour la scène 0 (installation du décor), "
+                        f"puis appelle generate_scene_image(image_index=0). "
+                        f"Répète pour chaque scène jusqu'à {IMAGES_PER_SEQUENCE - 1}, puis provide_choices."
                     ),
                 })
 
