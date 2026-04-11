@@ -2,7 +2,7 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "rm -rf node_modules package-lock.json && npm install --no-audit --no-fund --include=optional @rolldown/binding-linux-x64-gnu && npm install --no-audit --no-fund --include=optional && npm run build"
+    "buildCommand": "rm -f package-lock.json && npm install --no-audit --no-fund --include=optional @rolldown/binding-linux-x64-gnu && npm install --no-audit --no-fund --include=optional && npm run build"
   },
   "deploy": {
     "startCommand": "npx serve -s dist -l $PORT",
