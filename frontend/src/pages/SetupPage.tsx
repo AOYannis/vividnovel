@@ -4,15 +4,19 @@ import { useGameStore } from '../stores/gameStore'
 import { useT, useI18n, UI_LANGUAGES } from '../i18n'
 import { fetchActors, fetchSettings, startGame, fetchAvailableLoras, fetchDefaultStyleMoods, fetchGrokModels, fetchLanguages, previewSystemPrompt, listSessions, resumeSession, deleteSession, getSessionHistory, clearAllMemories } from '../api/client'
 import type { Actor, Setting, LoraInfo, GrokModel } from '../api/types'
+import ProfileModal from '../components/ProfileModal'
+import { loadProfile, hasProfile } from '../lib/profile'
 
-type SetupStep = 'player' | 'setting' | 'cast' | 'prompt'
+type SetupStep = 'home' | 'player' | 'setting' | 'cast' | 'prompt'
 
 export default function SetupPage() {
   const store = useGameStore()
   const t = useT()
   const { locale, setLocale } = useI18n()
-  const [step, setStep] = useState<SetupStep>('player')
+  const [step, setStep] = useState<SetupStep>('home')
   const [showDebug, setShowDebug] = useState(false)
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [showAdvancedPrompt, setShowAdvancedPrompt] = useState(false)
   const [allLoras, setAllLoras] = useState<LoraInfo[]>([])
   const [actors, setActors] = useState<Actor[]>([])
   const [settings, setSettings] = useState<Setting[]>([])
@@ -110,7 +114,38 @@ export default function SetupPage() {
       setSelectedLanguage(def)
     }).catch(() => {})
     listSessions().then(setSavedSessions).catch(() => {})
+
+    // Pre-fill from saved profile
+    const profile = loadProfile()
+    if (profile.name) {
+      setName(profile.name)
+      setAge(profile.age)
+      setGender(profile.gender)
+      if (profile.customGender) setCustomGender(profile.customGender)
+      setPreferences(profile.preferences)
+      if (profile.customPreferences) setCustomPreferences(profile.customPreferences)
+      setSelectedLanguage(profile.language)
+    }
   }, [])
+
+  /** Start a new story — skip the player step if profile is set */
+  const startNewStory = () => {
+    const profile = loadProfile()
+    if (profile.name) {
+      // Pre-fill and skip directly to setting step
+      setName(profile.name)
+      setAge(profile.age)
+      setGender(profile.gender)
+      if (profile.customGender) setCustomGender(profile.customGender)
+      setPreferences(profile.preferences)
+      if (profile.customPreferences) setCustomPreferences(profile.customPreferences)
+      setSelectedLanguage(profile.language)
+      setStep('setting')
+    } else {
+      // No profile yet → fall back to the player form
+      setStep('player')
+    }
+  }
 
   useEffect(() => {
     if (showDebug && allLoras.length === 0) {
@@ -215,6 +250,9 @@ export default function SetupPage() {
 
   /* ── Navigation buttons rendered into fixed bottom bar on mobile ── */
   const renderNavButtons = () => {
+    if (step === 'home') {
+      return null  // Home page has its own CTAs
+    }
     if (step === 'player') {
       return (
         <button
@@ -230,7 +268,7 @@ export default function SetupPage() {
       return (
         <div className="flex gap-3">
           <button
-            onClick={() => setStep('player')}
+            onClick={() => setStep('home')}
             className="flex-1 min-h-[48px] bg-neutral-800 hover:bg-neutral-700 py-3 rounded-lg font-medium transition-colors"
           >
             {t('setup.back')}
@@ -287,22 +325,19 @@ export default function SetupPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-neutral-950 px-4 py-6 md:flex md:items-center md:justify-center md:p-8">
-      {/* Language switcher — top left */}
-      <div className="fixed top-4 left-4 z-50 flex gap-1">
-        {UI_LANGUAGES.map((lang) => (
-          <button
-            key={lang.code}
-            onClick={() => { setLocale(lang.code); setSelectedLanguage(lang.code) }}
-            className={`text-[11px] px-2.5 py-1.5 rounded-full transition-colors ${
-              locale === lang.code
-                ? 'bg-indigo-600/80 text-white'
-                : 'bg-neutral-900/80 text-neutral-500 hover:text-neutral-300'
-            }`}
-          >
-            {lang.label}
-          </button>
-        ))}
+    <div className="min-h-[100dvh] bg-neutral-950 px-4 py-6 md:px-8 md:py-12">
+      {/* Profile / Language pill — top left */}
+      <div className="fixed top-4 left-4 z-50 flex gap-2 items-center">
+        <button
+          onClick={() => setShowProfileModal(true)}
+          className="flex items-center gap-2 px-3 py-1.5 min-h-[36px] rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 transition-colors text-xs backdrop-blur-sm"
+          title={t('profile.title') || 'Profile'}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+          </svg>
+          <span className="hidden sm:inline">{loadProfile().name || (t('profile.set_up') || 'Profile')}</span>
+        </button>
       </div>
 
       {/* Top right controls */}
@@ -429,7 +464,7 @@ export default function SetupPage() {
         </div>
       )}
 
-      <div className="w-full max-w-lg mx-auto pb-24 md:pb-0">
+      <div className="w-full max-w-lg mx-auto pb-28 md:pb-0 md:flex md:flex-col md:items-stretch">
         {/* Header */}
         <div className="text-center mb-10">
           <h1 className="text-4xl font-bold mb-2">
@@ -440,7 +475,7 @@ export default function SetupPage() {
         </div>
 
         {/* Saved sessions */}
-        {savedSessions.length > 0 && step === 'player' && (
+        {false && savedSessions.length > 0 && step === 'player' && (
           <div className="mb-8 fade-in">
             <h3 className="text-sm text-neutral-400 mb-3">{t('setup.resume_title')}</h3>
             <div className="space-y-2">
@@ -516,7 +551,8 @@ export default function SetupPage() {
           </div>
         )}
 
-        {/* Step indicator */}
+        {/* Step indicator (hidden on home) */}
+        {step !== 'home' && (
         <div className="flex justify-center gap-2 mb-8">
           {(['player', 'setting', 'cast', 'prompt'] as const).map((s, i) => {
             const allSteps = ['player', 'setting', 'cast', 'prompt'] as const
@@ -541,6 +577,110 @@ export default function SetupPage() {
             )
           })}
         </div>
+        )}
+
+        {/* ── Step 0: Home (landing) ── */}
+        {step === 'home' && (
+          <div className="fade-in space-y-6">
+            {savedSessions.length > 0 ? (
+              <>
+                <h2 className="text-base font-semibold text-neutral-300">{t('setup.resume_title') || 'Continue a story'}</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {savedSessions.slice(0, 6).map((s) => (
+                    <div key={s.id} className="group relative rounded-2xl overflow-hidden border border-neutral-800 hover:border-indigo-600 transition-all aspect-[4/3] bg-neutral-900">
+                      {s.thumbnail_url ? (
+                        <img
+                          src={s.thumbnail_url}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover opacity-70 group-hover:opacity-90 transition-opacity"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 bg-gradient-to-br from-indigo-950/40 to-purple-950/40" />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent" />
+                      <button
+                        onClick={() => handleResume(s.id)}
+                        disabled={resuming !== null}
+                        className="absolute inset-0 w-full h-full text-left p-4 flex flex-col justify-end disabled:opacity-50"
+                      >
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-white font-semibold text-base drop-shadow">{s.player?.name || 'Anonyme'}</span>
+                          <span className="text-white/60 text-xs">Seq. {s.sequence_number}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-white/60 mt-1">
+                          <span>{s.setting === 'custom' ? 'Custom' : s.setting?.replace('_', ' ')}</span>
+                          {s.total_costs?.total > 0 && (
+                            <span className="text-emerald-400/80 font-mono">${s.total_costs.total.toFixed(3)}</span>
+                          )}
+                          <span className="text-white/40 ml-auto">
+                            {new Date(s.updated_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                          </span>
+                        </div>
+                        {resuming === s.id && (
+                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          </div>
+                        )}
+                      </button>
+                      {/* Action buttons (gallery + delete) — top-right corner */}
+                      <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); store.openGallery(s.id) }}
+                          className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm text-white/70 hover:text-white hover:bg-indigo-600/70 transition-colors flex items-center justify-center"
+                          title="Galerie"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25c0 .828.672 1.5 1.5 1.5z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            if (!confirm(t('setup.delete_confirm'))) return
+                            await deleteSession(s.id)
+                            setSavedSessions(prev => prev.filter(x => x.id !== s.id))
+                          }}
+                          className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm text-white/70 hover:text-white hover:bg-red-600/70 transition-colors flex items-center justify-center"
+                          title="Supprimer"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {/* New story CTA */}
+            <button
+              onClick={startNewStory}
+              className="w-full py-5 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-base transition-all shadow-lg shadow-indigo-900/30"
+            >
+              {savedSessions.length > 0 ? (t('setup.start_new_story') || '+ New story') : (t('setup.start_first_story') || 'Start your first story')}
+            </button>
+
+            {savedSessions.length > 0 && (
+              <button
+                onClick={async () => {
+                  if (!confirm(t('setup.clear_memories_confirm'))) return
+                  try {
+                    const result = await clearAllMemories()
+                    alert(`${result.cleared} ${t('setup.clear_memories_done')}`)
+                  } catch (e) {
+                    alert(t('common.error') + ': ' + (e instanceof Error ? e.message : 'inconnu'))
+                  }
+                }}
+                className="w-full text-[11px] text-neutral-600 hover:text-red-400 transition-colors py-2"
+              >
+                {t('setup.clear_memories')}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* ── Step 1: Player ── */}
         {step === 'player' && (
@@ -714,18 +854,45 @@ export default function SetupPage() {
         {/* ── Step 4: System Prompt ── */}
         {step === 'prompt' && (
           <div className="fade-in space-y-4">
+            {/* Default: friendly summary, advanced toggle hides the raw prompt */}
+            {!showAdvancedPrompt ? (
+              <div className="text-center py-8 space-y-4">
+                <div className="text-5xl">🎬</div>
+                <h2 className="text-xl font-semibold text-neutral-200">
+                  {t('setup.step4.ready_title') || 'Ready to start'}
+                </h2>
+                <p className="text-sm text-neutral-500 max-w-sm mx-auto">
+                  {t('setup.step4.ready_subtitle') || 'Your story is configured. Hit Start whenever you want.'}
+                </p>
+                <button
+                  onClick={() => setShowAdvancedPrompt(true)}
+                  className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors underline-offset-2 hover:underline"
+                >
+                  {t('setup.step4.advanced') || 'Advanced settings'}
+                </button>
+              </div>
+            ) : (
+              <>
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-neutral-200">{t('setup.step4.title')}</h2>
-              <button
-                onClick={() => setShowVariants(!showVariants)}
-                className={`text-xs px-2.5 py-1.5 min-h-[40px] rounded-lg transition-colors ${
-                  showVariants
-                    ? 'bg-indigo-900 text-indigo-300'
-                    : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                {t('setup.step4.variants')} ({savedVariants.length})
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowAdvancedPrompt(false)}
+                  className="text-xs px-2.5 py-1.5 min-h-[40px] rounded-lg bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+                >
+                  {t('common.collapse') || 'Collapse'}
+                </button>
+                <button
+                  onClick={() => setShowVariants(!showVariants)}
+                  className={`text-xs px-2.5 py-1.5 min-h-[40px] rounded-lg transition-colors ${
+                    showVariants
+                      ? 'bg-indigo-900 text-indigo-300'
+                      : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  {t('setup.step4.variants')} ({savedVariants.length})
+                </button>
+              </div>
             </div>
 
             {/* Variants panel */}
@@ -1069,18 +1236,28 @@ export default function SetupPage() {
                 </div>
               </div>
             </details>
+              </>
+            )}
 
             {error && (
               <div className="text-red-400 text-sm bg-red-950/30 rounded-lg p-3">{error}</div>
             )}
           </div>
         )}
+
+        {/* ── Action bar: fixed bottom on mobile, inline on desktop ── */}
+        <div className="fixed bottom-0 inset-x-0 p-4 glass border-t border-neutral-800/50 md:static md:bg-transparent md:border-0 md:backdrop-blur-none md:p-0 md:mt-8 z-30">
+          <div className="max-w-lg mx-auto md:mx-0">
+            {renderNavButtons()}
+          </div>
+        </div>
       </div>
 
-      {/* ── Fixed bottom action bar (mobile) / static (desktop) ── */}
-      <div className="fixed bottom-0 inset-x-0 p-4 glass border-t border-neutral-800/50 md:static md:bg-transparent md:border-0 md:backdrop-blur-none md:p-0 md:mt-6 md:w-full md:max-w-lg z-30">
-        {renderNavButtons()}
-      </div>
+      {/* Profile modal */}
+      <ProfileModal
+        open={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+      />
     </div>
   )
 }

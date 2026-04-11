@@ -171,7 +171,7 @@ async def update_sequence_choice(session_id: str, seq_number: int, choice_made: 
 
 
 async def list_user_sessions(user_id: str) -> list:
-    """List all sessions for a user."""
+    """List all sessions for a user, including a thumbnail (latest image url)."""
     if not _client:
         return []
     try:
@@ -180,7 +180,30 @@ async def list_user_sessions(user_id: str) -> list:
             .eq("user_id", user_id) \
             .order("updated_at", desc=True) \
             .execute()
-        return result.data or []
+        sessions = result.data or []
+        # Fetch one thumbnail per session — latest image of latest sequence
+        for s in sessions:
+            try:
+                seq_res = _client.table("sequences") \
+                    .select("id") \
+                    .eq("session_id", s["id"]) \
+                    .order("sequence_number", desc=True) \
+                    .limit(1) \
+                    .execute()
+                if seq_res.data:
+                    seq_id = seq_res.data[0]["id"]
+                    img_res = _client.table("images") \
+                        .select("url") \
+                        .eq("sequence_id", seq_id) \
+                        .not_.is_("url", "null") \
+                        .order("image_index", desc=True) \
+                        .limit(1) \
+                        .execute()
+                    if img_res.data and img_res.data[0].get("url"):
+                        s["thumbnail_url"] = img_res.data[0]["url"]
+            except Exception:
+                pass  # thumbnail is optional
+        return sessions
     except Exception:
         traceback.print_exc()
         return []
