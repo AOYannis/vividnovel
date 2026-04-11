@@ -85,6 +85,7 @@ class StartGameRequest(BaseModel):
     player: PlayerProfile
     setting: str  # "paris_2026" | "paris_1800" | "neo_2100" | "custom"
     actors: list[str]  # ordered list of actor codenames (priority of encounter)
+    actor_genders: Optional[dict[str, str]] = None  # {codename: "female" | "trans"} — defaults to female
     custom_setting: Optional[str] = None  # user-defined setting description
     system_prompt_override: Optional[str] = None
     style_moods: Optional[dict] = None  # custom mood → LoRA mapping
@@ -211,7 +212,10 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
     if len(req.actors) != len(set(req.actors)):
         raise HTTPException(400, "Duplicate actors not allowed")
 
-    cast = {"actors": req.actors}
+    cast = {
+        "actors": req.actors,
+        "actor_genders": req.actor_genders or {},  # {code: "female" | "trans"}
+    }
     session_id = str(uuid.uuid4())
     session = GameSession(
         session_id=session_id,
@@ -1288,6 +1292,12 @@ async def resume_session(session_id: str, user: dict = Depends(get_current_user)
             character_names[actor_code] = display_name
     except Exception:
         pass
+
+    # Fallback: if history yielded no met_characters (old sessions saved before
+    # actors_present was persisted), assume the cast members ARE the met characters.
+    # This is a reasonable assumption since the cast is what the player chose to interact with.
+    if not met_characters:
+        met_characters = list(session.cast.get("actors", []) or [])
 
     return {
         "session_id": session_id,

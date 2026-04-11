@@ -346,6 +346,7 @@ class StoryEngine:
 
             image_tasks: dict[int, asyncio.Task] = {}
             completed_images: dict[int, dict] = {}
+            scene_actors: dict[int, list[str]] = {}  # image_index → actors_present (for DB persistence)
             davinci_fire_tasks: list[asyncio.Task] = []  # track _fire_davinci tasks
             video_task: asyncio.Task | None = None
             video_early_started = False
@@ -504,9 +505,9 @@ class StoryEngine:
                             )
 
                             # Update relationship progress for actors in the scene
-                            scene_actors = args.get("actors_present", [])
+                            rel_actors = args.get("actors_present", [])
                             scene_moods = args.get("style_moods", ["neutral"])
-                            for actor_code in scene_actors:
+                            for actor_code in rel_actors:
                                 if actor_code not in session.relationships:
                                     session.relationships[actor_code] = {
                                         "level": 0, "encounters": 0, "scenes": 0,
@@ -537,6 +538,7 @@ class StoryEngine:
                             )
                             image_tasks[image_index] = img_task
 
+                            scene_actors[image_index] = list(args.get("actors_present", []) or [])
                             await queue.put({
                                 "type": "image_requested",
                                 "index": image_index,
@@ -816,7 +818,7 @@ class StoryEngine:
                         "index": i,
                         "url": ci.get("url"),
                         "prompt": prompt_i,
-                        "actors": [],
+                        "actors": scene_actors.get(i, []),
                         "cost": ci.get("cost", 0),
                         "seed": ci.get("seed"),
                         "generation_time": ci.get("elapsed"),
@@ -1035,12 +1037,46 @@ class StoryEngine:
             if mood_data.get("steps") is not None:
                 mood_steps_override = mood_data["steps"]
 
-        # 3. Session style LoRAs (editable via debug)
+        # 3. Trans actor handling — when an actor in the scene is flagged as `trans`
+        # and the active mood is EXPLICIT (not casual/teasing), we:
+        #   - Add the ZTurbo Pen V3 LoRA (anatomical detail) — except for doggystyle
+        #     where stacking it with dgz produces artifacts
+        #   - Inject "trans woman, erect penis visible" into the prompt so the agent's
+        #     existing position description applies to a trans body
+        _intimate_moods = {
+            "explicit_mystic", "blowjob", "blowjob_closeup",
+            "cunnilingus", "cunnilingus_from_behind",
+            "missionary", "cowgirl", "reverse_cowgirl",
+            "spooning", "standing_sex",
+            "anal_doggystyle", "anal_missionary",
+            "cumshot_face", "titjob", "handjob",
+            # Note: "doggystyle" is intentionally excluded — ZTurbo Pen V3 + dgz LoRA
+            # produces bad results. The agent should describe the trans anatomy via the
+            # injected prompt fragment instead.
+        }
+        actor_genders = (cast or {}).get("actor_genders", {}) or {}
+        trans_actor_present = any(
+            actor_genders.get(code) == "trans" for code in actors
+        )
+        if trans_actor_present and any(m in _intimate_moods for m in active_moods):
+            # Add the anatomical detail LoRA (ZTurbo Pen V3)
+            mood_loras.append(ILora(model="warmline:202603170004@1", weight=1.0))
+            # Inject trans description into the prompt (after trigger word, before scene details)
+            trans_fragment = "trans woman with erect penis visible, anatomical detail, futa anatomy"
+            if trans_fragment[:30].lower() not in prompt.lower():
+                prompt = f"{prompt}, {trans_fragment}"
+        elif trans_actor_present and any(m == "doggystyle" for m in active_moods):
+            # Doggystyle case: skip the ZTurbo LoRA, just inject the prompt fragment
+            trans_fragment = "trans woman with erect penis visible, anatomical detail, futa anatomy"
+            if trans_fragment[:30].lower() not in prompt.lower():
+                prompt = f"{prompt}, {trans_fragment}"
+
+        # 4. Session style LoRAs (editable via debug)
         if style_loras:
             for sl in style_loras:
                 other_loras.append(ILora(model=sl["id"], weight=sl.get("weight", 1.0)))
 
-        # 4. Extra LoRAs (debug)
+        # 5. Extra LoRAs (debug)
         if extra_loras:
             for el in extra_loras:
                 other_loras.append(ILora(model=el["id"], weight=el.get("weight", 1.0)))

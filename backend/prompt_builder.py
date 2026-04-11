@@ -286,10 +286,13 @@ def build_system_prompt(
         f"Les descriptions ci-dessous (\"Apparence\") sont UNIQUEMENT pour les prompts image — NE PAS les "
         f"recopier ni les paraphraser dans la narration.\n"
     )
+    actor_genders = (cast or {}).get("actor_genders", {}) or {}
     for i, (code, actor_data) in enumerate(cast_actors):
         is_custom = actor_data.get('is_custom', False)
+        gender = actor_genders.get(code, "female")
+        gender_label = " — TRANS / SHEMALE" if gender == "trans" else ""
         cast_text += (
-            f"\n### Personnage {i + 1} (codename: {code})\n"
+            f"\n### Personnage {i + 1} (codename: {code}){gender_label}\n"
             f"- Apparence (POUR IMAGE PROMPTS UNIQUEMENT, ne pas mentionner dans la narration) : {actor_data['description']}\n"
             f"{_actor_prompt_instruction(actor_data, code)}\n"
         )
@@ -297,6 +300,17 @@ def build_system_prompt(
             cast_text += f"- Personnage personnalisé : invente une apparence cohérente avec le cadre\n"
         else:
             cast_text += f"- Donne-lui un prénom adapté au cadre ({setting_label}) — INVENTE un prénom local, n'utilise PAS de nom de personnage célèbre\n"
+        if gender == "trans":
+            cast_text += (
+                f"- ⚠️ **Personnage TRANS / SHEMALE** : c'est une femme avec un pénis. "
+                f"En narration, traite-la comme une femme normale (elle, son prénom féminin, etc.) "
+                f"et n'évoque sa particularité que quand le contexte le justifie naturellement "
+                f"(scène de déshabillage, intimité, révélation). "
+                f"En image_prompt, mentionne « trans woman with erect penis » dans les scènes "
+                f"où elle est nue ou en intimité explicite — le système ajoute automatiquement "
+                f"le LoRA d'anatomie. Pour la levrette (`doggystyle`), évite ce mood (bug visuel) "
+                f"et préfère `anal_doggystyle` ou `cowgirl` qui rendent mieux.\n"
+            )
 
     cast_text += (
         f"\nExemple : si le cadre est Paris, 'nataly' pourrait s'appeler Nathalie, "

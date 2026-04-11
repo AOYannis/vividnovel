@@ -61,6 +61,7 @@ export default function SetupPage() {
 
   // Cast
   const [selectedActors, setSelectedActors] = useState<string[]>([])
+  const [actorGenders, setActorGenders] = useState<Record<string, string>>({})  // codename -> 'female' | 'trans'
   const [customCharacterDesc, setCustomCharacterDesc] = useState('')
 
   // System prompt
@@ -279,6 +280,7 @@ export default function SetupPage() {
         player,
         setting: store.setting,
         actors: selectedActors,
+        actor_genders: Object.keys(actorGenders).length > 0 ? actorGenders : undefined,
         custom_setting: store.setting === 'custom' ? customSetting : undefined,
         system_prompt_override: promptEdited ? systemPrompt : undefined,
         style_moods: moodsLoaded ? styleMoods : undefined,
@@ -837,24 +839,54 @@ export default function SetupPage() {
             <div className="grid grid-cols-2 gap-3">
               {actors.map((actor) => {
                 const selected = selectedActors.includes(actor.codename)
+                const isTrans = actorGenders[actor.codename] === 'trans'
                 return (
-                  <button
+                  <div
                     key={actor.codename}
-                    onClick={() => toggleActor(actor.codename)}
                     className={`relative p-5 md:p-4 rounded-xl border text-left transition-all min-h-[80px] ${
                       selected
-                        ? 'border-purple-500 bg-purple-950/40'
+                        ? isTrans
+                          ? 'border-pink-500 bg-pink-950/30'
+                          : 'border-purple-500 bg-purple-950/40'
                         : 'border-neutral-800 bg-neutral-900 hover:border-neutral-700'
                     }`}
                   >
+                    <button
+                      onClick={() => toggleActor(actor.codename)}
+                      className="block w-full text-left"
+                    >
+                      {selected && (
+                        <span className={`absolute top-2 right-2 text-white text-xs w-6 h-6 md:w-5 md:h-5 rounded-full flex items-center justify-center ${
+                          isTrans ? 'bg-pink-600' : 'bg-purple-600'
+                        }`}>
+                          ✓
+                        </span>
+                      )}
+                      <div className="font-semibold text-neutral-100 text-base md:text-sm">{actor.display_name}</div>
+                      <div className="text-sm md:text-xs text-neutral-400 mt-1">{actor.description}</div>
+                    </button>
+                    {/* Gender toggle — only when actor is selected */}
                     {selected && (
-                      <span className="absolute top-2 right-2 bg-purple-600 text-white text-xs w-6 h-6 md:w-5 md:h-5 rounded-full flex items-center justify-center">
-                        ✓
-                      </span>
+                      <div className="flex gap-1 mt-2 bg-black/30 rounded-full p-0.5 w-fit" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => setActorGenders((prev) => { const n = { ...prev }; delete n[actor.codename]; return n })}
+                          className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                            !isTrans ? 'bg-purple-600 text-white' : 'text-neutral-500 hover:text-neutral-300'
+                          }`}
+                        >
+                          ♀
+                        </button>
+                        <button
+                          onClick={() => setActorGenders((prev) => ({ ...prev, [actor.codename]: 'trans' }))}
+                          className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                            isTrans ? 'bg-pink-600 text-white' : 'text-neutral-500 hover:text-neutral-300'
+                          }`}
+                        >
+                          ⚧ trans
+                        </button>
+                      </div>
                     )}
-                    <div className="font-semibold text-neutral-100 text-base md:text-sm">{actor.display_name}</div>
-                    <div className="text-sm md:text-xs text-neutral-400 mt-1">{actor.description}</div>
-                  </button>
+                  </div>
                 )
               })}
             </div>
