@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>daVinci MagiHuman</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid #1a1a2e; margin-bottom: 24px; }
+  header h1 { font-size: 18px; font-weight: 600; color: #fff; }
+  header h1 span { color: #6c63ff; }
+
+  /* Status bar */
+  .status-bar { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .status-chip { padding: 6px 14px; border-radius: 6px; font-size: 12px; background: #111122; border: 1px solid #1a1a2e; }
+  .status-chip.ready { border-color: #2d6a4f; color: #52b788; }
+  .status-chip.loading { border-color: #e9c46a; color: #e9c46a; }
+  .status-chip.offline { border-color: #e63946; color: #e63946; }
+  .status-chip .label { color: #666; margin-right: 6px; }
+
+  /* Main layout */
+  .main { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 700px) { .main { grid-template-columns: 1fr; } }
+
+  .panel { background: #111122; border: 1px solid #1a1a2e; border-radius: 10px; padding: 20px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 16px; }
+
+  /* Form */
+  label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; margin-top: 12px; }
+  label:first-child { margin-top: 0; }
+  textarea, input[type="number"], input[type="text"], input[type="password"] {
+    width: 100%; padding: 10px 12px; background: #0a0a14; border: 1px solid #222244; border-radius: 6px;
+    color: #e0e0e0; font-family: inherit; font-size: 13px; resize: vertical;
+  }
+  textarea:focus, input:focus { outline: none; border-color: #6c63ff; }
+  textarea { min-height: 100px; }
+
+  .image-upload { border: 2px dashed #222244; border-radius: 8px; padding: 24px; text-align: center; cursor: pointer; transition: border-color 0.2s; position: relative; }
+  .image-upload:hover { border-color: #6c63ff; }
+  .image-upload.has-image { padding: 0; border-style: solid; }
+  .image-upload img { max-width: 100%; border-radius: 6px; display: block; }
+  .image-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .image-upload .placeholder { color: #555; font-size: 13px; }
+
+  .row { display: flex; gap: 12px; }
+  .row > * { flex: 1; }
+
+  button.generate { width: 100%; margin-top: 20px; padding: 12px; background: #6c63ff; color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+  button.generate:hover { background: #5a52e0; }
+  button.generate:disabled { background: #333; color: #666; cursor: not-allowed; }
+
+  /* Result panel */
+  .result-area { min-height: 200px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+  .result-area video { width: 100%; border-radius: 8px; background: #000; }
+  .result-area .empty { color: #333; font-size: 13px; }
+
+  /* Progress */
+  .progress { margin-top: 12px; width: 100%; }
+  .progress-bar { height: 3px; background: #1a1a2e; border-radius: 2px; overflow: hidden; }
+  .progress-bar .fill { height: 100%; background: #6c63ff; transition: width 0.3s; }
+  .progress-text { font-size: 11px; color: #666; margin-top: 6px; text-align: center; }
+
+  /* Timing table */
+  .timing { margin-top: 16px; width: 100%; }
+  .timing table { width: 100%; font-size: 12px; }
+  .timing td { padding: 4px 0; }
+  .timing td:last-child { text-align: right; color: #6c63ff; font-weight: 600; }
+  .timing tr.total td { border-top: 1px solid #222; padding-top: 8px; color: #fff; }
+
+  /* History */
+  .history { margin-top: 24px; }
+  .history h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 12px; }
+  .history-list { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+  .history-item { flex: 0 0 120px; background: #111122; border: 1px solid #1a1a2e; border-radius: 8px; padding: 8px; cursor: pointer; transition: border-color 0.2s; }
+  .history-item:hover { border-color: #6c63ff; }
+  .history-item video { width: 100%; border-radius: 4px; }
+  .history-item .meta { font-size: 10px; color: #666; margin-top: 4px; }
+
+  /* Config bar */
+  .config-bar { display: flex; gap: 12px; margin-bottom: 16px; align-items: end; }
+  .config-bar > div { flex: 1; }
+  .config-bar input { font-size: 12px; }
+  .config-bar button { padding: 10px 16px; background: #1a1a2e; color: #888; border: 1px solid #222244; border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .config-bar button:hover { background: #222244; color: #fff; }
+
+  .ai-btn { padding: 5px 12px; background: linear-gradient(135deg, #2d1b69, #1a1a3e); border: 1px solid #6c63ff44; border-radius: 6px; color: #6c63ff; font-family: inherit; font-size: 11px; cursor: pointer; transition: all 0.15s; }
+  .ai-btn:hover { background: linear-gradient(135deg, #3d2b79, #2a2a4e); border-color: #6c63ff; color: #fff; }
+  .ai-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ai-go { background: #6c63ff; color: #fff; border-color: #6c63ff; }
+  .ai-go:hover { background: #5a52e0; }
+
+  .clear-btn { padding: 4px 10px; background: none; border: 1px solid #333; border-radius: 4px; color: #666; font-family: inherit; font-size: 11px; cursor: pointer; }
+  .clear-btn:hover { border-color: #e63946; color: #e63946; }
+
+  .seed-value { cursor: pointer; text-decoration: underline dotted; }
+  .seed-value:hover { color: #fff; }
+
+  .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .preset { padding: 8px 10px; background: #0a0a14; border: 1px solid #222244; border-radius: 6px; color: #888; font-family: inherit; font-size: 12px; cursor: pointer; transition: all 0.15s; text-align: center; }
+  .preset:hover { border-color: #6c63ff; color: #ccc; }
+  .preset.active { border-color: #6c63ff; background: #1a1a3e; color: #fff; }
+  .preset-info { font-size: 11px; color: #555; margin-top: 6px; text-align: center; }
+
+  .spinner { width: 24px; height: 24px; border: 2px solid #333; border-top-color: #6c63ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1><span>daVinci</span> MagiHuman</h1>
+    <div id="connection-status" class="status-chip offline"><span class="label">API</span>offline</div>
+  </header>
+
+  <div class="config-bar">
+    <div>
+      <label>Pod ID</label>
+      <input type="text" id="pod-id" value="bekbnbass90zmp" placeholder="pod-id">
+    </div>
+    <div>
+      <label>API Key</label>
+      <input type="password" id="api-key" value="" placeholder="dvk-...">
+    </div>
+    <button onclick="connectApi()">Connect</button>
+  </div>
+
+  <div class="status-bar" id="status-bar" style="display:none"></div>
+
+  <div class="main">
+    <div class="panel">
+      <h2>Input</h2>
+
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <label style="margin:0">Reference Image <span style="color:#555;font-weight:normal">(required)</span></label>
+        <button class="clear-btn" id="clear-image-btn" onclick="clearImage()" style="display:none">Clear</button>
+      </div>
+      <input type="file" id="image-input" accept="image/*" onchange="handleImage(event)" style="display:none">
+      <div class="image-upload" id="image-upload" onclick="document.getElementById('image-input').click()">
+        <div class="placeholder" id="image-placeholder">Click to upload a portrait photo</div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <label style="margin:0">Prompt</label>
+        <button class="ai-btn" id="ai-btn" onclick="aiPrompt()">AI Prompt Helper</button>
+      </div>
+      <div id="ai-input-area" style="display:none;margin-top:8px;margin-bottom:8px">
+        <textarea id="ai-brief" rows="2" placeholder="Brief description: e.g. 'A woman greeting in French in a cozy café' or 'A man explaining a recipe enthusiastically in English'"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <select id="ai-language" style="flex:1;padding:8px;background:#0a0a14;border:1px solid #222244;border-radius:6px;color:#e0e0e0;font-family:inherit;font-size:12px">
+            <option value="English">English</option>
+            <option value="French" selected>French</option>
+            <option value="German">German</option>
+            <option value="Chinese (Mandarin)">Chinese (Mandarin)</option>
+            <option value="Japanese">Japanese</option>
+            <option value="Korean">Korean</option>
+            <option value="Chinese (Cantonese)">Chinese (Cantonese)</option>
+          </select>
+          <button class="ai-btn ai-go" id="ai-go-btn" onclick="runAiPrompt()">Generate Prompt</button>
+        </div>
+      </div>
+      <textarea id="prompt" placeholder="Describe the scene, dialogue, and emotions..."></textarea>
+
+      <label>Resolution</label>
+      <div class="preset-grid" id="preset-grid">
+        <button class="preset active" data-preset="256p-land" onclick="setPreset(this)">256p Landscape</button>
+        <button class="preset" data-preset="256p-port" onclick="setPreset(this)">256p Portrait</button>
+        <button class="preset" data-preset="540p-land" onclick="setPreset(this)">540p Landscape</button>
+        <button class="preset" data-preset="540p-port" onclick="setPreset(this)">540p Portrait</button>
+        <button class="preset" data-preset="1080p-land" onclick="setPreset(this)">1080p Landscape</button>
+        <button class="preset" data-preset="1080p-port" onclick="setPreset(this)">1080p Portrait</button>
+      </div>
+      <div class="preset-info" id="preset-info">448x256 | ~3s warm</div>
+
+      <div class="row">
+        <div>
+          <label>Duration (s)</label>
+          <input type="number" id="seconds" value="5" min="1" max="10">
+        </div>
+        <div>
+          <label>Seed</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" id="seed" value="42" style="flex:1">
+            <label style="margin:0;display:flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer">
+              <input type="checkbox" id="random-seed" onchange="toggleRandomSeed()"> Random
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hidden fields for actual resolution values -->
+      <input type="hidden" id="br-width" value="448">
+      <input type="hidden" id="br-height" value="256">
+      <input type="hidden" id="sr-width" value="">
+      <input type="hidden" id="sr-height" value="">
+
+      <button class="generate" id="generate-btn" onclick="generate()" disabled>Generate</button>
+    </div>
+
+    <div class="panel">
+      <h2>Output</h2>
+      <div class="result-area" id="result-area">
+        <div class="empty">No generation yet</div>
+      </div>
+      <div class="progress" id="progress" style="display:none">
+        <div class="progress-bar"><div class="fill" id="progress-fill"></div></div>
+        <div class="progress-text" id="progress-text"></div>
+      </div>
+      <div class="timing" id="timing" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="history" id="history-section" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h2 style="margin:0">History</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="storage-info" style="font-size:11px;color:#555"></span>
+        <button class="clear-btn" onclick="clearAllJobs()">Clear all remote</button>
+      </div>
+    </div>
+    <div class="history-list" id="history-list"></div>
+  </div>
+</div>
+
+<script>
+let baseUrl = '';
+let apiKey = '';
+let imageFile = null;
+const history = [];
+
+const PRESETS = {
+  '256p-land':  { br_w: 448, br_h: 256, sr_w: null, sr_h: null, label: '448x256 | ~3s warm', sr: false },
+  '256p-port':  { br_w: 256, br_h: 448, sr_w: null, sr_h: null, label: '256x448 | ~3s warm', sr: false },
+  '540p-land':  { br_w: 448, br_h: 256, sr_w: 896,  sr_h: 512,  label: '896x512 | ~30s warm (SR)', sr: true },
+  '540p-port':  { br_w: 256, br_h: 448, sr_w: 512,  sr_h: 896,  label: '512x896 | ~30s warm (SR)', sr: true },
+  '1080p-land': { br_w: 448, br_h: 256, sr_w: 1920, sr_h: 1088, label: '1920x1088 | ~2min warm (SR)', sr: true },
+  '1080p-port': { br_w: 256, br_h: 448, sr_w: 1088, sr_h: 1920, label: '1088x1920 | ~2min warm (SR)', sr: true },
+};
+let currentPreset = '256p-land';
+
+let currentServerMode = 'unknown'; // track what the server is running
+
+function setPreset(btn) {
+  document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentPreset = btn.dataset.preset;
+  const p = PRESETS[currentPreset];
+  document.getElementById('br-width').value = p.br_w;
+  document.getElementById('br-height').value = p.br_h;
+  document.getElementById('sr-width').value = p.sr_w || '';
+  document.getElementById('sr-height').value = p.sr_h || '';
+
+  const needsSR = p.sr;
+  const serverHasSR = currentServerMode === 'sr_540p';
+  const info = document.getElementById('preset-info');
+
+  if (needsSR && !serverHasSR) {
+    info.innerHTML = p.label + ' — <span style="color:#e9c46a">needs mode switch (~5 min)</span> <button class="ai-btn" onclick="switchServerMode(\'sr_540p\')" style="margin-left:6px">Switch to SR mode</button>';
+  } else if (!needsSR && serverHasSR) {
+    info.innerHTML = p.label + ' — <span style="color:#888">SR mode active, distill is faster</span> <button class="ai-btn" onclick="switchServerMode(\'distill\')" style="margin-left:6px">Switch to Fast mode</button>';
+  } else {
+    info.textContent = p.label;
+  }
+}
+
+async function switchServerMode(mode) {
+  if (!baseUrl) return;
+  const info = document.getElementById('preset-info');
+  const genBtn = document.getElementById('generate-btn');
+
+  info.innerHTML = '<span style="color:#e9c46a">Switching mode... (loading models, ~5 min)</span>';
+  genBtn.disabled = true;
+
+  try {
+    const formData = new FormData();
+    formData.append('mode', mode);
+
+    const res = await fetch(`${baseUrl}/switch-mode`, {
+      method: 'POST',
+      headers: { 'X-Api-Key': apiKey },
+      body: formData,
+    });
+    const data = await res.json();
+
+    if (data.status === 'already_loaded') {
+      currentServerMode = data.mode;
+      info.innerHTML = '<span style="color:#52b788">Already in this mode. Ready.</span>';
+      genBtn.disabled = !imageFile;
+      connectApi();
+    } else if (data.status === 'switching') {
+      info.innerHTML = '<span style="color:#e9c46a">Server restarting with new mode... polling for readiness</span>';
+      // Poll until the server comes back with the new mode
+      const targetMode = mode;
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetch(`${baseUrl}/status`, { headers: { 'X-Api-Key': apiKey } });
+          const s = await r.json();
+          if (s.warm && s.model_mode === targetMode) {
+            clearInterval(poll);
+            currentServerMode = s.model_mode;
+            info.innerHTML = '<span style="color:#52b788">Mode switched! Ready.</span>';
+            genBtn.disabled = !imageFile;
+            connectApi();
+          }
+        } catch(e) { /* server still restarting */ }
+      }, 10000); // check every 10s
+    } else {
+      throw new Error(data.detail || 'Switch failed');
+    }
+  } catch(e) {
+    info.innerHTML = `<span style="color:#e63946">Switch failed: ${e.message}</span>`;
+    genBtn.disabled = !imageFile;
+  }
+}
+
+// Set your xAI API key here when using this standalone UI
+const GROK_API_KEY = '';
+
+const DAVINCI_PROMPT_SYSTEM = `You generate prompts for daVinci-MagiHuman, a talking-head video AI. Output ONLY the raw prompt — no headers, no numbering, no labels like "Main Body:", no explanations, no markdown.
+
+The prompt has exactly 3 sections separated by blank lines. Here is the EXACT format you must follow:
+
+Medium close-up shot of a middle-aged woman with curly auburn hair and silver wire-rimmed glasses, wearing a dark green turtleneck. She is positioned in the center of the frame against a static, dimly lit office background with blurred bookshelves. The camera remains completely still. Initially, her facial muscles are relaxed, but as she inhales slightly, her eyes widen and her eyebrows raise in sudden realization. She blinks twice rapidly. Her jaw drops slightly, and the corners of her mouth turn upward into a subtle, knowing smile. She tilts her head a fraction of an inch to the right as she begins to speak. Her lips articulate the words clearly with natural pacing, showing slight tension in her cheeks as she enunciates. After finishing her sentence, her lips part slightly as she lets out a soft breath, maintaining unbroken eye contact with the camera. Her torso remains entirely stationary throughout the performance.
+
+Dialogue:
+<middle-aged woman, English>: "I knew you were going to figure it out eventually."
+
+Background Sound:
+<Faint hum of an air conditioner>
+
+RULES:
+- Section 1 (the description): 150-200 words, ALWAYS in English even if character speaks another language. Describe anatomy not emotion ("eyebrows furrow, jaw tightens" not "looks angry"). Static camera, static background, stationary torso. Chronological frame-by-frame facial cues. If a reference image is provided, match appearance/clothing/lighting exactly.
+- Section 2: MUST start with "Dialogue:" on its own line, then "<character description, language>:" followed by the spoken line in quotes in the TARGET language.
+- Section 3: MUST start with "Background Sound:" on its own line, then "<description>" or "<No prominent background sound>".
+- NO headers, NO labels like "Main Body", NO numbering, NO markdown. Just the raw 3 sections.
+- NO camera movement (no pan, zoom, track). NO scene changes.`;
+
+let imageDataUrl = null;
+
+function aiPrompt() {
+  const area = document.getElementById('ai-input-area');
+  area.style.display = area.style.display === 'none' ? 'block' : 'none';
+}
+
+async function runAiPrompt() {
+  const brief = document.getElementById('ai-brief').value.trim();
+  const language = document.getElementById('ai-language').value;
+  const btn = document.getElementById('ai-go-btn');
+
+  if (!brief) { alert('Please enter a brief description'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+
+  try {
+    const messages = [
+      { role: 'system', content: DAVINCI_PROMPT_SYSTEM },
+    ];
+
+    const userText = `Generate a daVinci-MagiHuman prompt for this scene:\n\nBrief: ${brief}\nDialogue language: ${language}\n${imageDataUrl ? 'A reference image is attached — match the person\'s appearance, clothing, and setting exactly.' : 'No reference image provided — invent a plausible appearance.'}`;
+
+    // Use multimodal content if image is available, plain text otherwise
+    if (imageDataUrl) {
+      messages.push({
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: imageDataUrl } },
+          { type: 'text', text: userText }
+        ]
+      });
+    } else {
+      messages.push({ role: 'user', content: userText });
+    }
+
+    const model = 'grok-4-1-fast-non-reasoning';
+
+    const res = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + GROK_API_KEY,
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: messages,
+        temperature: 0.7,
+        max_tokens: 1000,
+      }),
+    });
+
+    const data = await res.json();
+    console.log('Grok response:', data);
+
+    if (data.error) {
+      throw new Error(data.error.message || JSON.stringify(data.error));
+    }
+    if (!data.choices || !data.choices.length) {
+      throw new Error('No response from Grok API: ' + JSON.stringify(data));
+    }
+    const prompt = data.choices[0].message.content;
+
+    // Clean up: remove markdown code fences if present
+    const cleaned = prompt.replace(/^```[\w]*\n?/gm, '').replace(/```$/gm, '').trim();
+    document.getElementById('prompt').value = cleaned;
+
+    // Collapse the AI input area
+    document.getElementById('ai-input-area').style.display = 'none';
+
+  } catch (e) {
+    alert('AI error: ' + e.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Generate Prompt';
+}
+
+function clearImage() {
+  imageFile = null;
+  imageDataUrl = null;
+  document.getElementById('image-input').value = '';
+  const upload = document.getElementById('image-upload');
+  upload.classList.remove('has-image');
+  upload.innerHTML = '<div class="placeholder" id="image-placeholder">Click to upload a portrait photo</div>';
+  document.getElementById('clear-image-btn').style.display = 'none';
+  document.getElementById('generate-btn').disabled = true;
+}
+
+function copySeed(seed) {
+  document.getElementById('random-seed').checked = false;
+  const seedInput = document.getElementById('seed');
+  seedInput.disabled = false;
+  seedInput.value = seed;
+  seedInput.placeholder = '';
+}
+
+function toggleRandomSeed() {
+  const seedInput = document.getElementById('seed');
+  const isRandom = document.getElementById('random-seed').checked;
+  seedInput.disabled = isRandom;
+  if (isRandom) {
+    seedInput.value = '';
+    seedInput.placeholder = 'random';
+  } else {
+    seedInput.value = '42';
+    seedInput.placeholder = '';
+  }
+}
+
+function getBaseUrl() {
+  const podId = document.getElementById('pod-id').value.trim();
+  return `https://${podId}-8888.proxy.runpod.net`;
+}
+
+async function connectApi() {
+  baseUrl = getBaseUrl();
+  apiKey = document.getElementById('api-key').value.trim();
+  const chip = document.getElementById('connection-status');
+
+  try {
+    chip.className = 'status-chip loading';
+    chip.innerHTML = '<span class="label">API</span>connecting...';
+
+    const res = await fetch(`${baseUrl}/status`, { headers: { 'X-Api-Key': apiKey } });
+    const data = await res.json();
+
+    chip.className = 'status-chip ready';
+    chip.innerHTML = '<span class="label">API</span>ready';
+    currentServerMode = data.model_mode;
+
+    // Re-evaluate preset info now that we know the server mode
+    const activePreset = document.querySelector('.preset.active');
+    if (activePreset) setPreset(activePreset);
+
+    const bar = document.getElementById('status-bar');
+    bar.style.display = 'flex';
+    bar.innerHTML = `
+      <div class="status-chip ready"><span class="label">Model</span>${data.model_mode}</div>
+      <div class="status-chip ${data.warm ? 'ready' : 'loading'}"><span class="label">Warm</span>${data.warm ? 'yes' : 'no'}</div>
+      <div class="status-chip"><span class="label">GPU</span>${data.gpu_name}</div>
+      <div class="status-chip"><span class="label">VRAM</span>${data.gpu_memory_allocated_gb}/${data.gpu_memory_total_gb} GB</div>
+      <div class="status-chip"><span class="label">Generations</span>${data.generation_count}</div>
+      <div class="status-chip"><span class="label">Last</span>${data.last_generation_time ? data.last_generation_time.toFixed(1) + 's' : '-'}</div>
+    `;
+
+    document.getElementById('generate-btn').disabled = !imageFile;
+    loadHistory();
+  } catch (e) {
+    chip.className = 'status-chip offline';
+    chip.innerHTML = `<span class="label">API</span>error: ${e.message}`;
+  }
+}
+
+function handleImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  imageFile = file;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const upload = document.getElementById('image-upload');
+    upload.classList.add('has-image');
+    upload.innerHTML = `<img src="${e.target.result}">`;
+    imageDataUrl = e.target.result; // Store for AI prompt helper
+    document.getElementById('clear-image-btn').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+
+  if (baseUrl) document.getElementById('generate-btn').disabled = false;
+}
+
+async function generate() {
+  if (!imageFile || !baseUrl) return;
+
+  const btn = document.getElementById('generate-btn');
+  const resultArea = document.getElementById('result-area');
+  const progress = document.getElementById('progress');
+  const timing = document.getElementById('timing');
+
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  progress.style.display = 'block';
+  timing.style.display = 'none';
+  resultArea.innerHTML = '<div class="spinner"></div>';
+
+  const startTime = Date.now();
+  const progressFill = document.getElementById('progress-fill');
+  const progressText = document.getElementById('progress-text');
+
+  // Animate progress bar
+  // Estimate time based on preset
+  const preset = PRESETS[currentPreset];
+  const estimatedTime = preset.sr ? 150 : 90; // seconds
+
+  let elapsed = 0;
+  const timer = setInterval(() => {
+    elapsed = (Date.now() - startTime) / 1000;
+    const pct = Math.min(95, (elapsed / estimatedTime) * 100);
+    progressFill.style.width = pct + '%';
+    progressText.textContent = `${elapsed.toFixed(1)}s elapsed...`;
+  }, 100);
+
+  try {
+    // Resolve seed
+    const isRandom = document.getElementById('random-seed').checked;
+    const seed = isRandom ? Math.floor(Math.random() * 2147483647) : document.getElementById('seed').value;
+
+    const formData = new FormData();
+    formData.append('prompt', document.getElementById('prompt').value);
+    formData.append('image', imageFile);
+    formData.append('seconds', document.getElementById('seconds').value);
+    formData.append('seed', seed);
+    formData.append('br_width', document.getElementById('br-width').value);
+    formData.append('br_height', document.getElementById('br-height').value);
+
+    const srW = document.getElementById('sr-width').value;
+    const srH = document.getElementById('sr-height').value;
+    if (srW && srH) {
+      formData.append('sr_width', srW);
+      formData.append('sr_height', srH);
+    }
+
+    // Submit job (returns immediately)
+    const submitRes = await fetch(`${baseUrl}/generate`, {
+      method: 'POST',
+      headers: { 'X-Api-Key': apiKey },
+      body: formData,
+    });
+
+    if (!submitRes.ok) {
+      const err = await submitRes.json();
+      throw new Error(err.detail || 'Submit failed');
+    }
+
+    const submitData = await submitRes.json();
+    const jobId = submitData.job_id;
+    progressText.textContent = `Job ${jobId} submitted, generating...`;
+
+    // Poll for completion
+    const data = await new Promise((resolve, reject) => {
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetch(`${baseUrl}/generate/${jobId}`, { headers: { 'X-Api-Key': apiKey } });
+          const d = await r.json();
+          if (d.status === 'completed') {
+            clearInterval(poll);
+            resolve(d);
+          } else if (d.status === 'failed') {
+            clearInterval(poll);
+            reject(new Error(d.error || 'Generation failed'));
+          }
+          // else still running, keep polling
+        } catch(e) { /* network blip, keep polling */ }
+      }, 3000); // poll every 3s
+
+      // Safety timeout: 10 min
+      setTimeout(() => { clearInterval(poll); reject(new Error('Timeout after 10 minutes')); }, 600000);
+    });
+
+    clearInterval(timer);
+
+    progressFill.style.width = '100%';
+    progressText.textContent = `Done in ${data.duration_seconds.toFixed(2)}s`;
+
+    // Fetch video with auth for playback
+    const videoRes = await fetch(`${baseUrl}${data.video_url}`, { headers: { 'X-Api-Key': apiKey } });
+    const videoBlob = await videoRes.blob();
+    const blobUrl = URL.createObjectURL(videoBlob);
+    resultArea.innerHTML = `<video controls autoplay loop src="${blobUrl}"></video>`;
+
+    // Show timing + seed
+    const jobSeed = data.seed || seed;
+    timing.style.display = 'block';
+    timing.innerHTML = `<table>
+      <tr><td>Inference</td><td>${data.timing.inference.toFixed(2)}s</td></tr>
+      <tr class="total"><td>Total</td><td>${data.duration_seconds.toFixed(2)}s</td></tr>
+      <tr><td>Resolution</td><td>${data.resolution}</td></tr>
+      <tr><td>File size</td><td>${data.file_size_mb} MB</td></tr>
+      <tr><td>Seed</td><td><span class="seed-value" onclick="copySeed(${jobSeed})" title="Click to reuse">${jobSeed}</span></td></tr>
+      <tr><td>Job ID</td><td>${data.video_url.split('/')[2]}</td></tr>
+    </table>`;
+
+    // If random seed was used, show it in the seed input for easy reuse
+    if (isRandom) {
+      document.getElementById('seed').value = jobSeed;
+    }
+
+    // Add to history
+    history.unshift({ ...data, blobUrl });
+    renderHistory();
+
+    // Refresh status
+    connectApi();
+
+  } catch (e) {
+    clearInterval(timer);
+    resultArea.innerHTML = `<div class="empty" style="color:#e63946">${e.message}</div>`;
+    progressText.textContent = 'Failed';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Generate';
+}
+
+function renderHistory() {
+  if (history.length === 0) return;
+  document.getElementById('history-section').style.display = 'block';
+  const list = document.getElementById('history-list');
+  list.innerHTML = history.map((h, i) => `
+    <div class="history-item" onclick="document.getElementById('result-area').innerHTML='<video controls autoplay loop src=&quot;${h.blobUrl}&quot;></video>'">
+      <video src="${h.blobUrl}" muted></video>
+      <div class="meta">${h.duration_seconds.toFixed(1)}s | ${h.resolution}</div>
+    </div>
+  `).join('');
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch(`${baseUrl}/jobs`, { headers: { 'X-Api-Key': apiKey } });
+    const data = await res.json();
+    const jobs = data.jobs || [];
+    const info = document.getElementById('storage-info');
+    if (jobs.length > 0) {
+      document.getElementById('history-section').style.display = 'block';
+      info.textContent = `${jobs.length} jobs on server`;
+    }
+  } catch(e) {}
+}
+
+async function clearAllJobs() {
+  if (!confirm('Delete all generated videos from the server?')) return;
+  try {
+    const res = await fetch(`${baseUrl}/jobs`, { headers: { 'X-Api-Key': apiKey } });
+    const data = await res.json();
+    for (const job of (data.jobs || [])) {
+      await fetch(`${baseUrl}/jobs/${job.job_id}`, { method: 'DELETE', headers: { 'X-Api-Key': apiKey } });
+    }
+    document.getElementById('storage-info').textContent = '0 jobs on server';
+    // Keep local history (blob URLs still work), just clear server storage
+    alert('Server storage cleared.');
+    loadHistory();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// Auto-connect on load
+window.addEventListener('load', () => {
+  if (document.getElementById('pod-id').value && document.getElementById('api-key').value) {
+    connectApi();
+  }
+});
+</script>
+</body>
+</html>

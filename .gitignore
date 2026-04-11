@@ -1,0 +1,83 @@
+# ─── Secrets / env ────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# ─── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+ENV/
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.tox/
+build/
+
+# ─── Node / Frontend ──────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.vite/
+
+# ─── Editor / OS ──────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db
+
+# ─── Logs / runtime data ──────────────────────────────────────
+logs/
+*.log
+backend/logs/
+backend/.venv/
+
+# ─── Project-specific ─────────────────────────────────────────
+lora_prompts.md
+lora prompts.md
+lora prompts copy.md
+confif.md
+.claude/
+
+# ─── Build outputs ────────────────────────────────────────────
+frontend/dist/
+
+# ─── Old / scratch files ──────────────────────────────────────
+app.py
+__pycache__/app.cpython-313.pyc
+/requirements.txt
+/static/
+
+# ─── Large model files (LoRAs) — NEVER commit ─────────────────
+lora_to_load/
+*.safetensors
+*.ckpt
+*.bin
+*.pt
+*.pth
+
+# ─── AI assistant / scratch ───────────────────────────────────
+.aider*
+.cursor/
