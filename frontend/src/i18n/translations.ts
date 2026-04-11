@@ -123,6 +123,23 @@ const translations: Record<string, Record<string, string>> = {
     'common.error': 'Erreur',
     'common.menu': 'Menu',
     'common.default': 'defaut',
+    'common.cancel': 'Annuler',
+    'common.save': 'Enregistrer',
+    'common.collapse': 'Reduire',
+
+    // Profile
+    'profile.title': 'Profil',
+    'profile.set_up': 'Profil',
+    'profile.language': 'Langue',
+
+    // Setup - home
+    'setup.start_new_story': '+ Nouvelle histoire',
+    'setup.start_first_story': 'Commencer ta premiere histoire',
+
+    // Setup - step 4 ready / advanced
+    'setup.step4.ready_title': 'Pret a commencer',
+    'setup.step4.ready_subtitle': 'Ton histoire est configuree. Lance-toi quand tu veux.',
+    'setup.step4.advanced': 'Parametres avances',
   },
 
   // ── English ──
@@ -239,6 +256,20 @@ const translations: Record<string, Record<string, string>> = {
     'common.error': 'Error',
     'common.menu': 'Menu',
     'common.default': 'default',
+    'common.cancel': 'Cancel',
+    'common.save': 'Save',
+    'common.collapse': 'Collapse',
+
+    'profile.title': 'Profile',
+    'profile.set_up': 'Profile',
+    'profile.language': 'Language',
+
+    'setup.start_new_story': '+ New story',
+    'setup.start_first_story': 'Start your first story',
+
+    'setup.step4.ready_title': 'Ready to start',
+    'setup.step4.ready_subtitle': 'Your story is configured. Hit Start whenever you want.',
+    'setup.step4.advanced': 'Advanced settings',
   },
 
   // ── Spanish ──
@@ -278,6 +309,17 @@ const translations: Record<string, Record<string, string>> = {
     'history.title': 'Resumen',
     'gallery.title': 'Galeria',
     'gallery.back': 'Volver al menu',
+    'common.cancel': 'Cancelar',
+    'common.save': 'Guardar',
+    'common.collapse': 'Plegar',
+    'profile.title': 'Perfil',
+    'profile.set_up': 'Perfil',
+    'profile.language': 'Idioma',
+    'setup.start_new_story': '+ Nueva historia',
+    'setup.start_first_story': 'Empieza tu primera historia',
+    'setup.step4.ready_title': 'Listo para empezar',
+    'setup.step4.ready_subtitle': 'Tu historia esta configurada. Comienza cuando quieras.',
+    'setup.step4.advanced': 'Ajustes avanzados',
   },
 
   // ── German ──
@@ -309,6 +351,17 @@ const translations: Record<string, Record<string, string>> = {
     'history.title': 'Zusammenfassung',
     'gallery.title': 'Galerie',
     'gallery.back': 'Zuruck zum Menu',
+    'common.cancel': 'Abbrechen',
+    'common.save': 'Speichern',
+    'common.collapse': 'Einklappen',
+    'profile.title': 'Profil',
+    'profile.set_up': 'Profil',
+    'profile.language': 'Sprache',
+    'setup.start_new_story': '+ Neue Geschichte',
+    'setup.start_first_story': 'Starte deine erste Geschichte',
+    'setup.step4.ready_title': 'Bereit zum Start',
+    'setup.step4.ready_subtitle': 'Deine Geschichte ist konfiguriert. Starte wann du willst.',
+    'setup.step4.advanced': 'Erweiterte Einstellungen',
   },
 
   // ── Japanese ──
@@ -332,6 +385,17 @@ const translations: Record<string, Record<string, string>> = {
     'game.swipe_hint': 'スワイプして続きを読む',
     'history.title': 'あらすじ',
     'gallery.title': 'ギャラリー',
+    'common.cancel': 'キャンセル',
+    'common.save': '保存',
+    'common.collapse': '折りたたむ',
+    'profile.title': 'プロフィール',
+    'profile.set_up': 'プロフィール',
+    'profile.language': '言語',
+    'setup.start_new_story': '+ 新しい物語',
+    'setup.start_first_story': '最初の物語を始める',
+    'setup.step4.ready_title': '準備完了',
+    'setup.step4.ready_subtitle': '物語の設定が完了しました。いつでも始められます。',
+    'setup.step4.advanced': '詳細設定',
   },
 }
 

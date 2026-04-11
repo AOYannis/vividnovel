@@ -35,19 +35,19 @@ export default function ProfileModal({ open, onClose, onSave }: ProfileModalProp
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-neutral-200">{t('profile.title') || 'Profile'}</h2>
+          <h2 className="text-base font-semibold text-neutral-200">{t('profile.title')}</h2>
           <button onClick={onClose} className="text-neutral-500 hover:text-neutral-200 text-xl w-8 h-8 flex items-center justify-center">&times;</button>
         </div>
 
         <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
           {/* Name */}
           <div>
-            <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('setup.step1.first_name') || 'First name'}</label>
+            <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('setup.step1.name')}</label>
             <input
               type="text"
               value={profile.name}
               onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-              placeholder="Yannis"
+              placeholder={t('setup.step1.name_placeholder')}
               className="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-indigo-500 focus:outline-none placeholder-neutral-600"
             />
           </div>
@@ -55,7 +55,7 @@ export default function ProfileModal({ open, onClose, onSave }: ProfileModalProp
           {/* Age + Gender + Attracted to */}
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('setup.step1.age') || 'Age'}</label>
+              <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('setup.step1.age')}</label>
               <input
                 type="number"
                 value={profile.age}
@@ -66,28 +66,29 @@ export default function ProfileModal({ open, onClose, onSave }: ProfileModalProp
               />
             </div>
             <div>
-              <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('setup.step1.gender') || 'Gender'}</label>
+              <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('setup.step1.gender')}</label>
               <select
                 value={profile.gender}
                 onChange={(e) => setProfile({ ...profile, gender: e.target.value })}
                 className="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2.5 text-sm text-neutral-100 focus:border-indigo-500 focus:outline-none"
               >
-                <option value="homme">{t('setup.step1.man') || 'Man'}</option>
-                <option value="femme">{t('setup.step1.woman') || 'Woman'}</option>
-                <option value="custom">{t('setup.step1.other') || 'Other'}</option>
+                <option value="homme">{t('setup.step1.gender.man')}</option>
+                <option value="femme">{t('setup.step1.gender.woman')}</option>
+                <option value="non-binaire">{t('setup.step1.gender.nb')}</option>
+                <option value="custom">{t('setup.step1.gender.other')}</option>
               </select>
             </div>
             <div>
-              <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('setup.step1.attracted_to') || 'Attracted to'}</label>
+              <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('setup.step1.preferences')}</label>
               <select
                 value={profile.preferences}
                 onChange={(e) => setProfile({ ...profile, preferences: e.target.value })}
                 className="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2.5 text-sm text-neutral-100 focus:border-indigo-500 focus:outline-none"
               >
-                <option value="femmes">{t('setup.step1.women') || 'Women'}</option>
-                <option value="hommes">{t('setup.step1.men') || 'Men'}</option>
-                <option value="tout le monde">{t('setup.step1.everyone') || 'Everyone'}</option>
-                <option value="custom">{t('setup.step1.other') || 'Other'}</option>
+                <option value="femmes">{t('setup.step1.pref.women')}</option>
+                <option value="hommes">{t('setup.step1.pref.men')}</option>
+                <option value="tout le monde">{t('setup.step1.pref.everyone')}</option>
+                <option value="custom">{t('setup.step1.pref.other')}</option>
               </select>
             </div>
           </div>
@@ -98,7 +99,7 @@ export default function ProfileModal({ open, onClose, onSave }: ProfileModalProp
               type="text"
               value={profile.customGender || ''}
               onChange={(e) => setProfile({ ...profile, customGender: e.target.value })}
-              placeholder="Décris ton genre"
+              placeholder={t('setup.step1.gender.custom_placeholder')}
               className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-indigo-500 focus:outline-none placeholder-neutral-600"
             />
           )}
@@ -109,14 +110,14 @@ export default function ProfileModal({ open, onClose, onSave }: ProfileModalProp
               type="text"
               value={profile.customPreferences || ''}
               onChange={(e) => setProfile({ ...profile, customPreferences: e.target.value })}
-              placeholder="Décris tes préférences"
+              placeholder={t('setup.step1.pref.custom_placeholder')}
               className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-indigo-500 focus:outline-none placeholder-neutral-600"
             />
           )}
 
           {/* Language */}
           <div>
-            <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('profile.language') || 'Language'}</label>
+            <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">{t('profile.language')}</label>
             <div className="flex flex-wrap gap-1.5 mt-2">
               {UI_LANGUAGES.map((lang) => (
                 <button
@@ -137,14 +138,14 @@ export default function ProfileModal({ open, onClose, onSave }: ProfileModalProp
 
         <div className="px-5 py-4 border-t border-neutral-800 flex gap-2">
           <button onClick={onClose} className="flex-1 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 py-2.5 rounded-lg text-sm font-medium transition-colors">
-            {t('common.cancel') || 'Cancel'}
+            {t('common.cancel')}
           </button>
           <button
             onClick={handleSave}
             disabled={!profile.name.trim()}
             className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
           >
-            {t('common.save') || 'Save'}
+            {t('common.save')}
           </button>
         </div>
       </div>

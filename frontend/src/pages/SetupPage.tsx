@@ -331,12 +331,12 @@ export default function SetupPage() {
         <button
           onClick={() => setShowProfileModal(true)}
           className="flex items-center gap-2 px-3 py-1.5 min-h-[36px] rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 transition-colors text-xs backdrop-blur-sm"
-          title={t('profile.title') || 'Profile'}
+          title={t('profile.title')}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
           </svg>
-          <span className="hidden sm:inline">{loadProfile().name || (t('profile.set_up') || 'Profile')}</span>
+          <span className="hidden sm:inline">{loadProfile().name || t('profile.set_up')}</span>
         </button>
       </div>
 
@@ -660,7 +660,7 @@ export default function SetupPage() {
               onClick={startNewStory}
               className="w-full py-5 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-base transition-all shadow-lg shadow-indigo-900/30"
             >
-              {savedSessions.length > 0 ? (t('setup.start_new_story') || '+ New story') : (t('setup.start_first_story') || 'Start your first story')}
+              {savedSessions.length > 0 ? t('setup.start_new_story') : t('setup.start_first_story')}
             </button>
 
             {savedSessions.length > 0 && (
@@ -859,16 +859,16 @@ export default function SetupPage() {
               <div className="text-center py-8 space-y-4">
                 <div className="text-5xl">🎬</div>
                 <h2 className="text-xl font-semibold text-neutral-200">
-                  {t('setup.step4.ready_title') || 'Ready to start'}
+                  {t('setup.step4.ready_title')}
                 </h2>
                 <p className="text-sm text-neutral-500 max-w-sm mx-auto">
-                  {t('setup.step4.ready_subtitle') || 'Your story is configured. Hit Start whenever you want.'}
+                  {t('setup.step4.ready_subtitle')}
                 </p>
                 <button
                   onClick={() => setShowAdvancedPrompt(true)}
                   className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors underline-offset-2 hover:underline"
                 >
-                  {t('setup.step4.advanced') || 'Advanced settings'}
+                  {t('setup.step4.advanced')}
                 </button>
               </div>
             ) : (
@@ -880,7 +880,7 @@ export default function SetupPage() {
                   onClick={() => setShowAdvancedPrompt(false)}
                   className="text-xs px-2.5 py-1.5 min-h-[40px] rounded-lg bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
                 >
-                  {t('common.collapse') || 'Collapse'}
+                  {t('common.collapse')}
                 </button>
                 <button
                   onClick={() => setShowVariants(!showVariants)}

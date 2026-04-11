@@ -461,11 +461,20 @@ export default function SceneCard({
       {image.status === 'ready' && image.url ? (
         <>
           {!imageLoaded && <div className="absolute inset-0 shimmer" />}
-          {/* Original image — always present as base layer */}
+          {/* Blurred backdrop (desktop only) — same image stretched + blurred to fill the viewport */}
           <img
             src={image.url}
             alt=""
-            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
+            aria-hidden
+            className={`hidden md:block absolute inset-0 w-full h-full object-cover transition-opacity duration-700 scale-110 blur-2xl brightness-50 ${
+              imageLoaded ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
+          {/* Original image — cover on mobile (immersive), contain on desktop (preserve ratio) */}
+          <img
+            src={image.url}
+            alt=""
+            className={`absolute inset-0 w-full h-full object-cover md:object-contain transition-opacity duration-700 ${
               imageLoaded ? 'opacity-100' : 'opacity-0'
             }`}
             onLoad={() => setImageLoaded(true)}
@@ -484,7 +493,7 @@ export default function SceneCard({
                   const vid = e.target as HTMLVideoElement
                   vid.play().catch(() => {})
                 }}
-                className="absolute inset-0 z-[1] w-full h-full object-cover transition-opacity duration-700 opacity-100"
+                className="absolute inset-0 z-[1] w-full h-full object-cover md:object-contain transition-opacity duration-700 opacity-100"
               />
               {/* Sound indicator — tap anywhere to unmute/mute */}
               <div className="absolute top-14 right-3 z-[5] bg-black/50 backdrop-blur-sm rounded-full w-8 h-8 flex items-center justify-center pointer-events-none">
@@ -512,7 +521,7 @@ export default function SceneCard({
             <img
               src={adaptedImageUrl}
               alt=""
-              className={`absolute inset-0 z-[2] w-full h-full object-cover transition-opacity duration-500 ${
+              className={`absolute inset-0 z-[2] w-full h-full object-cover md:object-contain transition-opacity duration-500 ${
                 currentPage >= narrationPages.length ? 'opacity-100' : 'opacity-0'
               }`}
             />

@@ -557,7 +557,7 @@ DEFAULT_STYLE_MOODS = {
     },
     "futa_shemale": {
         "description": "Futa / shemale — lorsque le personnage est une futa / shemale / transsexuelle, toujours décrire plusieurs fois le pénis en détail",
-        "lora": {"id": "warmline:202603230003@1", "name": "PhotoShemPen V1", "weight": 1.0},
+        "lora": {"id": "warmline:202603170004@1", "name": "ZTurbo Pen V3", "weight": 1.0},
         "prompt_block": (
             "POV first-person from below, white shemale lifting skirt to show big erect penis visible between legs, "
             "no panties, close-up of crotch and thighs, indoor bedroom background, "
@@ -612,6 +612,7 @@ AVAILABLE_LORAS = [
     {"id": "warmline:202603290003@1", "name": "White Short Hair", "type": "character", "trigger": "wh1te"},
     {"id": TITJOB_LORA_ID, "name": "Nsfw Titjob", "type": "style", "trigger": "Nsfw_Titjob"},
     {"id": POVHJ_LORA_ID, "name": "POV Handjob (povhj)", "type": "style", "trigger": "povhj"},
+    {"id": "warmline:202604110001@1", "name": "ZPenis V2", "type": "style"},
 ]
 
 # ─── Settings ────────────────────────────────────────────────────────────────
