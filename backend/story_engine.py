@@ -255,7 +255,7 @@ class StoryEngine:
                     for char_code in cast_codes:
                         if not char_code:
                             continue
-                        char_mem = recall_character_memory(session.id, char_code)
+                        char_mem = recall_character_memory(session.user_id, char_code, setting_id=session.setting)
                         if char_mem:
                             display = ACTOR_REGISTRY.get(char_code, {}).get("display_name", char_code)
                             char_memories.append(f"### Ce que {display} sait sur le joueur\n{char_mem}")
@@ -333,11 +333,12 @@ class StoryEngine:
                 messages.append({
                     "role": "user",
                     "content": (
-                        f"Commence l'histoire — c'est la SÉQUENCE 1 de l'INTRO ARC. "
-                        f"Le joueur va rencontrer plusieurs personnages du casting ({cast_codes_str}) "
-                        f"dans des situations distinctes (chacun a 2-3 scènes dédiées). "
-                        f"À la fin, propose 4 choix qui correspondent chacun à un personnage croisé. "
-                        f"\n\nÉcris 1-2 phrases pour la scène 0 (installation du décor), "
+                        f"Commence l'histoire. Le joueur arrive dans UN lieu ou UNE situation "
+                        f"où il va naturellement croiser plusieurs personnes (casting disponible : "
+                        f"{cast_codes_str}). Pas un défilé — une scène vivante où les gens se "
+                        f"croisent, s'interrompent, coexistent. Présente environ la moitié du casting "
+                        f"dans cette séquence, le reste viendra naturellement après.\n"
+                        f"\nÉcris 1-2 phrases pour la scène 0 (installation du décor + le joueur seul), "
                         f"puis appelle generate_scene_image(image_index=0). "
                         f"Répète pour chaque scène jusqu'à {IMAGES_PER_SEQUENCE - 1}, puis provide_choices."
                     ),
@@ -733,13 +734,15 @@ class StoryEngine:
 
                     log.log_mem0_store(len(all_narration), _choice)
 
+                    _setting_id = session.setting
                     def _store():
-                        # Session-scoped + per-character memory
+                        # Session-scoped + per-character memory (cross-session via user+setting)
                         store_sequence_narrative(
                             session_id=_sid, user_id=_uid,
                             sequence_number=_seq, narration_text=all_narration,
                             choice_made=_choice, setting_label=_setting,
                             characters=_chars,
+                            setting_id=_setting_id,
                         )
 
                     asyncio.get_event_loop().run_in_executor(None, _store)

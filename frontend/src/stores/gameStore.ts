@@ -81,7 +81,7 @@ interface GameState {
   setSetting: (s: string) => void
   setCast: (c: Cast) => void
   startSession: (sessionId: string) => void
-  resumeSession: (sessionId: string, sequenceNumber: number, history: HistorySequence[]) => void
+  resumeSession: (sessionId: string, sequenceNumber: number, history: HistorySequence[], metCharacters?: string[], characterNames?: Record<string, string>) => void
   startStreaming: () => void
   handleSSEEvent: (event: SSEEvent) => void
   selectChoice: (choice: Choice) => void
@@ -143,8 +143,17 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     sequenceNumber: 0,
   }),
 
-  resumeSession: (sessionId: string, sequenceNumber: number, history: HistorySequence[] = []) => {
+  resumeSession: (sessionId: string, sequenceNumber: number, history: HistorySequence[] = [], metCharacters: string[] = [], characterNames: Record<string, string> = {}) => {
     // Convert DB history into CompletedSequences for infinite scroll-back
+    // Also rebuild the met characters list from history (in case the server didn't send any)
+    const derivedMet = new Set<string>(metCharacters)
+    for (const seq of history) {
+      for (const img of seq.images || []) {
+        for (const actor of (img as any).actors_present || []) {
+          if (actor) derivedMet.add(actor)
+        }
+      }
+    }
     const completed: CompletedSequence[] = history.map((seq) => {
       const sortedImages = [...(seq.images || [])].sort((a, b) => a.image_index - b.image_index)
       return {
@@ -182,6 +191,8 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       completedSequences: completed,
       choices: lastChoices,
       historySequences: history,
+      metCharacters: Array.from(derivedMet),
+      characterNames: { ...characterNames },
     })
   },
 
