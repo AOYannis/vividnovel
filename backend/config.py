@@ -208,14 +208,14 @@ DEFAULT_STYLE_MOODS = {
         ),
         "lora": None,
         "prompt_block": (
-            "An extreme macro close-up POV first-person shot, eye-level intimate kiss from the camera perspective, "
+            "An extreme macro close-up POV first-person shot, eye-level intimate close up on woman ready to be kissed from the camera perspective, "
             "ultra-tight crop of her half face filling the entire frame, "
             "only the lower half of her face visible with the rest heavily cropped out, "
             "eyes closed in bliss, head slightly tilted, full glossy lips slightly parted for a kiss to the camera, "
-            "visible moist tongue tip and glimpse of white teeth, "
+            "glimpse of moist tongue behind lips and white teeth, "
             "highly detailed skin texture with subtle pores and natural skin tones, faint lip gloss sheen. "
             "Shot on 85mm macro lens, Portra Film Photo, ultra shallow depth of field, crisp details, organic textures. "
-            "CRITICAL: only one woman visible, no second person in frame"
+            "CRITICAL: only one woman visible"
         ),
         "example": (
             "Her lower face fills the frame, lips parted toward the lens, eyes closed, "
@@ -311,10 +311,10 @@ DEFAULT_STYLE_MOODS = {
         "lora": _LORA_MYSTIC_XXX_ZIT_V5,
         "prompt_block": (
             "cunnilingus, POV Close-up photograph of a woman's vulva, with her legs spread apart. "
-            "Her skin is light and smooth, with a small patch of dark pubic hair above her pink, "
-            "slightly parted by fingers labia. The texture of her skin is soft, with faint blue veins visible. "
+            "Her skin is light and smooth, with a small patch of dark pubic hair above her vulva, "
+            "her vulva labia visibly wet, her vulva dripping saliva, and her labia are slightly parted by man's hands at the bottom of the frame. The texture of her skin is soft, with faint blue veins visible. "
             "Face at top of frame with parted lips and eyes half-closed in pleasure looking down toward camera, "
-            "medium breasts and smooth belly in mid-frame, intimate oral contact area at lower frame, "
+            "medium breasts and smooth belly in mid-frame, vulva visible at lower frame with hands around it "
             "highly detailed skin texture with subtle pores and natural tones, "
             "warm intimate bedside lamp lighting casting soft shadows. "
             "Shot on 50mm lens, Portra Film Photo, shallow depth of field, cinematic color grading, crisp details, organic textures"
@@ -350,15 +350,15 @@ DEFAULT_STYLE_MOODS = {
         "steps": 14,
     },
     "missionary": {
-        "description": "Missionnaire — femme sur le dos, jambes écartées, partenaire entre ses cuisses (POV possible)",
+        "description": "Missionnaire — femme sur le dos, jambes écartées, partenaire entre ses cuisses",
         "lora": _LORA_MYSTIC_XXX_ZIT_V5,
         "prompt_block": (
-            "hetero, POV first-person looking down at naked woman on bed on her back, spread legs, vaginal sex, "
+            "POV first-person looking down at naked woman on bed on her back, spread legs, penis visible at bottom of frame penetrating her vulva "
             "medium breasts, nipples, navel, nude, realistic skin, closed eyes or intimate eye contact toward camera, "
-            "only male hands or groin at lower edge of frame, bedroom, uncensored, no wide shot of both bodies, "
+            "only male penis, hands or groin at lower edge of frame."
             "highly detailed skin texture with subtle pores and natural tones, "
             "warm intimate bedside lamp lighting casting soft shadows. "
-            "Shot on 50mm lens, Portra Film Photo, shallow depth of field, cinematic color grading, crisp details, organic textures"
+            
         ),
         "example": (
             "POV missionary: her face and breasts dominant, legs wrapped or spread, male forearms at frame edges, "
@@ -368,15 +368,15 @@ DEFAULT_STYLE_MOODS = {
         "steps": 14,
     },
     "cowgirl": {
-        "description": "Cowgirl — femme au-dessus, face au partenaire, chevauchée",
+        "description": "Cowgirl — femme au dessus pénétrée vaignalement, face au partenaire",
         "lora": _LORA_MYSTIC_XXX_ZIT_V5,
         "prompt_block": (
-            "cowgirl position, POV first-person lying on back looking up at woman straddling, riding, "
-            "hands on his chest or her thighs, vaginal sex, eye contact or head tilted back, bedroom, photorealistic, "
-            "her torso and face dominant in frame, explicit penetration implied or visible, "
+            "POV explicit shot of a woman visible on the entire frame, she is straddling, her vulva penetrated by a penis, man chest and penis visible at the bottom, "
+            "The woman has her hands on man's chest or her thighs, vaginal sex, eye contact or head tilted back, bedroom, photorealistic, "
+            "her torso and face dominant in frame, explicit penis penetration visible at the bottom of the frame, "
             "highly detailed skin texture with subtle pores and natural tones, "
             "warm intimate lighting casting soft shadows. "
-            "Shot on 50mm lens, Portra Film Photo, shallow depth of field, cinematic color grading, crisp details"
+            
         ),
         "example": (
             "POV from below: she leans forward hands on his chest, hair falling forward, "
@@ -390,7 +390,7 @@ DEFAULT_STYLE_MOODS = {
         "lora": _LORA_MYSTIC_XXX_ZIT_V5,
         "prompt_block": (
             "reverse cowgirl, POV first-person from below looking up at woman from behind, straddling, back arched, "
-            "buttocks prominent, man lying beneath, hands on her hips or ass at frame edge, vaginal sex, explicit, "
+            "buttocks prominent, man lying beneath, hands on her hips or ass at frame edge, penis penetrating her vulva, vaginal sex, visible anus above her vulva,explicit, "
             "bedroom lighting, "
             "highly detailed skin texture with subtle pores and natural tones. "
             "Shot on 50mm lens, Portra Film Photo, shallow depth of field, cinematic color grading, crisp details"
@@ -458,11 +458,10 @@ DEFAULT_STYLE_MOODS = {
         "description": "Cuillère — côte à côte, pénétration depuis derrière en position allongée",
         "lora": _LORA_MYSTIC_XXX_ZIT_V5,
         "prompt_block": (
-            "spooning sex, POV first-person over her shoulder in bed, side lying, man behind woman, both nude, "
-            "intimate penetration from behind, her face in profile toward camera, his arm around her waist visible, "
+            "spooning sex, POV first-person over her shoulder in bed, side lying, "
+            "POV man'spenis visible at bottom right of frame, penetrating her vulva from behind, her face in profile toward camera,  "
             "warm soft bedroom light, tight crop no wide establishing shot, "
             "highly detailed skin texture with subtle pores and natural tones. "
-            "Shot on 50mm lens, Portra Film Photo, shallow depth of field, cinematic color grading, crisp details"
         ),
         "example": (
             "POV intimate crop: tangled legs, her head on pillow turned slightly toward lens, "
@@ -472,21 +471,20 @@ DEFAULT_STYLE_MOODS = {
         "steps": 14,
     },
     "standing_sex": {
-        "description": "Debout — contre un mur, jambe relevée, ou face à face debout",
+        "description": "Debout — pénétration vaginale debout contre un mur, face à face",
         "lora": _LORA_MYSTIC_XXX_ZIT_V5,
         "prompt_block": (
-            "standing sex, POV first-person chest-height, against wall or door, one leg lifted or wrapped around waist, "
-            "her face and upper body dominant, passionate embrace, penetration, male hands under her thighs at frame "
-            "edges, indoor location, explicit, cinematic lighting, no distant wide couple shot, "
+            "standing sex, POV first-person chest-height, laying against wall, "
+            "woman's face and upper body dominant, penis visible at the bottom of the frame penetrating her vulva while she's standing, male hands on her waist at frame "
+            "edges,  explicit, cinematic lighting,  "
             "highly detailed skin texture with subtle pores and natural tones. "
-            "Shot on 50mm lens, Portra Film Photo, shallow depth of field, cinematic color grading, crisp details"
         ),
         "example": (
             "POV: her back to wall filling frame, his forearms at lower edge, "
             "overhead spot + warm bounce from floor"
         ),
         "cfg": 0,
-        "steps": 14,
+        "steps": 8,
     },
     "anal_doggystyle": {
         "description": "Anal levrette — à quatre pattes, pénétration anale par derrière, POV serré",
