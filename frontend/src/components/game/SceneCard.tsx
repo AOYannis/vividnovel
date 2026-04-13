@@ -154,6 +154,23 @@ export default function SceneCard({
   const [videoRegenLoading, setVideoRegenLoading] = useState(false)
   const [showVideoPrompt, setShowVideoPrompt] = useState(false)
   const [videoPromptEdit, setVideoPromptEdit] = useState('')
+  const [videoWaitSeconds, setVideoWaitSeconds] = useState(0)
+  const videoWaitRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Timer: count up while image is ready but video hasn't arrived
+  useEffect(() => {
+    if (image.status === 'ready' && image.url && !image.sceneVideoUrl && !image.sceneVideoSimulated) {
+      // Start counting
+      setVideoWaitSeconds(0)
+      videoWaitRef.current = setInterval(() => setVideoWaitSeconds((s) => s + 1), 1000)
+      return () => { if (videoWaitRef.current) clearInterval(videoWaitRef.current) }
+    } else {
+      // Video arrived or image not ready — stop
+      if (videoWaitRef.current) clearInterval(videoWaitRef.current)
+      videoWaitRef.current = null
+      setVideoWaitSeconds(0)
+    }
+  }, [image.status, image.url, image.sceneVideoUrl, image.sceneVideoSimulated])
   const sceneVideoRef = useRef<HTMLVideoElement>(null)
   const soundPlayCount = useRef(0) // how many loops have played with sound
 
@@ -514,6 +531,13 @@ export default function SceneCard({
             <div className="absolute top-14 left-3 z-[5] bg-purple-600/70 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 pointer-events-none">
               <div className="w-2 h-2 rounded-full bg-purple-300 animate-pulse" />
               <span className="text-[10px] text-white/90 font-mono">VIDEO SIM</span>
+            </div>
+          )}
+          {/* Video generation timer — subtle indicator while waiting */}
+          {videoWaitSeconds > 2 && !image.sceneVideoUrl && !image.sceneVideoSimulated && (
+            <div className="absolute top-14 left-3 z-[5] bg-black/40 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 pointer-events-none">
+              <div className="w-2 h-2 rounded-full bg-cyan-400/70 animate-pulse" />
+              <span className="text-[10px] text-white/50 font-mono">{videoWaitSeconds}s</span>
             </div>
           )}
           {/* Adapted image (from chat) — overlays when viewing chat pages */}

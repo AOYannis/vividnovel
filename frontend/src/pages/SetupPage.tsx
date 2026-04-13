@@ -37,6 +37,8 @@ export default function SetupPage() {
   const [earlyStartVideo, setEarlyStartVideo] = useState(false)
   const [videoMode, setVideoMode] = useState<'256_10' | '256_5' | '540_5'>('256_10')
   const [videoBackend, setVideoBackend] = useState<'davinci' | 'pvideo' | 'none'>('pvideo')
+  const [videoDraftMode, setVideoDraftMode] = useState(true)
+  const [videoStartScene, setVideoStartScene] = useState(0)  // 0=all, 4=last 4 only
   const [pvideoPromptUpsampling, setPvideoPromptUpsampling] = useState<'default' | 'on' | 'off'>('default')
 
   // Grok model selection
@@ -291,6 +293,8 @@ export default function SetupPage() {
         video_hd: videoMode === '540_5' || undefined,
         video_short: videoMode === '256_5' || undefined,
         video_backend: videoBackend,
+        video_draft: videoDraftMode,
+        video_start_scene: videoStartScene || undefined,
         pvideo_prompt_upsampling: pvideoPromptUpsampling === 'default' ? undefined : pvideoPromptUpsampling === 'on',
         custom_character_desc: selectedActors.includes('custom') ? customCharacterDesc || undefined : undefined,
       })
@@ -1153,6 +1157,45 @@ export default function SetupPage() {
                     ))}
                   </div>
                 </div>
+              )}
+              {/* Draft mode + start scene — applies to both backends when not 'none' */}
+              {videoBackend !== 'none' && (
+                <>
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3.5 md:py-3 min-h-[56px]">
+                    <span className="text-sm font-medium text-neutral-300">Video quality</span>
+                    <div className="flex bg-neutral-800 rounded-lg p-0.5 mt-2">
+                      <button onClick={() => setVideoDraftMode(true)}
+                        className={`flex-1 px-2 py-1.5 text-xs rounded-md transition-colors ${videoDraftMode ? 'bg-purple-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>
+                        Draft (fast)
+                      </button>
+                      <button onClick={() => setVideoDraftMode(false)}
+                        className={`flex-1 px-2 py-1.5 text-xs rounded-md transition-colors ${!videoDraftMode ? 'bg-purple-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>
+                        Full quality
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-neutral-600 mt-1.5">
+                      {videoDraftMode ? 'Fast & cheap — lower visual quality' : 'Better quality — ~3x slower & more expensive'}
+                    </p>
+                  </div>
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3.5 md:py-3 min-h-[56px]">
+                    <span className="text-sm font-medium text-neutral-300">Generate video for</span>
+                    <div className="flex bg-neutral-800 rounded-lg p-0.5 mt-2">
+                      {([
+                        [0, 'All 8 scenes'],
+                        [4, 'Last 4 scenes'],
+                        [6, 'Last 2 scenes'],
+                      ] as const).map(([val, label]) => (
+                        <button key={val} onClick={() => setVideoStartScene(val)}
+                          className={`flex-1 px-2 py-1.5 text-xs rounded-md transition-colors ${videoStartScene === val ? 'bg-purple-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[9px] text-neutral-600 mt-1.5">
+                      {videoStartScene === 0 ? 'Every scene gets a video' : `Scenes 0-${videoStartScene - 1} = image only, scenes ${videoStartScene}-7 = image + video`}
+                    </p>
+                  </div>
+                </>
               )}
               {videoBackend === 'pvideo' && (
                 <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3.5 md:py-3 min-h-[56px]">

@@ -1452,10 +1452,14 @@ class StoryEngine:
 
             # Fire per-scene video generation in background (non-blocking)
             video_backend = session.video_settings.get("video_backend", "pvideo") if session else "pvideo"
-            print(f"[video] Scene {idx}: video_backend={video_backend}, has_url={bool(result.get('url'))}, narr_len={len(narration_segments) if narration_segments else 0}")
             # If davinci selected but pod is down, skip silently (don't block)
             if video_backend == "davinci" and not DAVINCI_ENABLED:
                 video_backend = "none"
+            # video_start_scene: skip video gen for scenes before the threshold (image only)
+            video_start_scene = session.video_settings.get("video_start_scene", 0) if session else 0
+            if idx < video_start_scene:
+                video_backend = "none"
+            print(f"[video] Scene {idx}: video_backend={video_backend}, has_url={bool(result.get('url'))}, start_scene={video_start_scene}")
             if result.get("url") and narration_segments and video_backend != "none":
                 _seq_num = session.sequence_number if session else 0
 

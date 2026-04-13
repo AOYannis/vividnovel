@@ -96,6 +96,8 @@ class StartGameRequest(BaseModel):
     video_hd: bool = False   # 540p/5s
     video_short: bool = False  # 256p/5s
     video_backend: str = "pvideo"  # "davinci" | "pvideo" | "none"
+    video_draft: bool = True  # True=draft (fast/cheap), False=full quality
+    video_start_scene: int = 0  # 0=all scenes get video, 4=only scenes 4-7 get video
     pvideo_prompt_upsampling: Optional[bool] = None  # None=runware default, True=force on, False=force off
     custom_character_desc: Optional[str] = None  # description for the "custom" actor
 
@@ -244,6 +246,9 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
         session.video_settings["video_short"] = True
     if req.video_backend:
         session.video_settings["video_backend"] = req.video_backend
+    session.video_settings["draft"] = req.video_draft
+    if req.video_start_scene > 0:
+        session.video_settings["video_start_scene"] = req.video_start_scene
     if req.pvideo_prompt_upsampling is not None:
         session.video_settings["pvideo_prompt_upsampling"] = req.pvideo_prompt_upsampling
     # Patch custom character description into ACTOR_REGISTRY for this session

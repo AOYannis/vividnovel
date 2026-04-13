@@ -124,6 +124,8 @@ export async function startGame(params: {
   video_hd?: boolean
   video_short?: boolean
   video_backend?: string
+  video_draft?: boolean
+  video_start_scene?: number
   pvideo_prompt_upsampling?: boolean
   custom_character_desc?: string
 }) {
