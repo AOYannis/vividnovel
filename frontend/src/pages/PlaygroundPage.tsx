@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useGameStore } from '../stores/gameStore'
-import { fetchPlaygroundConfig, generatePlayground, manualGenerate, playgroundVideo } from '../api/client'
+import {
+  fetchPlaygroundConfig, generatePlayground, manualGenerate, playgroundVideo,
+  playgroundTTS, playgroundTTSEnhance, playgroundAudioVideo,
+} from '../api/client'
 
 interface PlaygroundConfig {
   actors: { code: string; name: string; description: string }[]
@@ -9,6 +12,10 @@ interface PlaygroundConfig {
   loras: { id: string; name: string; type: string }[]
   defaults: { width: number; height: number; steps: number }
   languages: string[]
+  tts?: {
+    voices: { id: string; label: string }[]
+    languages: string[]
+  }
 }
 
 interface ImageResult {
@@ -33,7 +40,7 @@ interface SimResult {
   image_error?: string
 }
 
-type Mode = 'simulate' | 'manual' | 'video'
+type Mode = 'simulate' | 'manual' | 'video' | 'speech'
 
 function LoraEditor({ loras, available, onChange }: {
   loras: { id: string; weight: number }[]
@@ -167,6 +174,28 @@ export default function PlaygroundPage() {
     generation_time: number; elapsed: number; cost?: number; prompt_used: string; simulated: boolean
   } | null>(null)
   const [videoLoading, setVideoLoading] = useState(false)
+
+  // ── Speech mode state ──
+  const [speechConcept, setSpeechConcept] = useState('Une invitation chuchotée, intime: « Approche... ne dis rien. »')
+  const [speechBrief, setSpeechBrief] = useState('intimate, breathy, slow')
+  const [speechVoice, setSpeechVoice] = useState('ara')
+  const [speechLanguage, setSpeechLanguage] = useState('fr')
+  const [speechPrompt, setSpeechPrompt] = useState('')
+  const [speechAudioData, setSpeechAudioData] = useState<string | null>(null)
+  const [speechAudioUrl, setSpeechAudioUrl] = useState('')
+  const [speechAudioMeta, setSpeechAudioMeta] = useState<{ chars: number; cost: number; elapsed: number } | null>(null)
+  const [speechEnhancing, setSpeechEnhancing] = useState(false)
+  const [speechGenerating, setSpeechGenerating] = useState(false)
+  const [speechVideoLoading, setSpeechVideoLoading] = useState(false)
+  const [speechVideoData, setSpeechVideoData] = useState<string | null>(null)
+  const [speechVideoUrl, setSpeechVideoUrl] = useState('')
+  const [speechVideoMeta, setSpeechVideoMeta] = useState<{ cost: number; elapsed: number; prompt_used: string } | null>(null)
+  const [speechVideoImageUrl, setSpeechVideoImageUrl] = useState('')
+  const [speechVideoPrompt, setSpeechVideoPrompt] = useState('')
+  const [speechVideoDraft, setSpeechVideoDraft] = useState(false)
+  const [speechVideoResolution, setSpeechVideoResolution] = useState('720p')
+  const [enhanceElapsed, setEnhanceElapsed] = useState<number | null>(null)
+  const speechAudioRef = useRef<HTMLAudioElement>(null)
 
   // ── ControlNet state ──
   const [cnEnabled, setCnEnabled] = useState(false)
@@ -308,6 +337,102 @@ export default function PlaygroundPage() {
     setMode('video')
   }
 
+  // ── Speech handlers ──
+  const handleSpeechEnhance = async () => {
+    if (!speechConcept.trim()) return
+    setSpeechEnhancing(true)
+    setError('')
+    try {
+      const res = await playgroundTTSEnhance({
+        text: speechConcept,
+        voice: speechVoice,
+        language: speechLanguage,
+        brief: speechBrief,
+      })
+      setSpeechPrompt(res.enhanced_text)
+      setEnhanceElapsed(res.elapsed)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSpeechEnhancing(false)
+    }
+  }
+
+  const handleSpeechGenerate = async () => {
+    const text = (speechPrompt || speechConcept).trim()
+    if (!text) return
+    setSpeechGenerating(true)
+    setError('')
+    setSpeechAudioData(null)
+    setSpeechAudioUrl('')
+    try {
+      const res = await playgroundTTS({
+        text,
+        voice: speechVoice,
+        language: speechLanguage,
+        output_format: 'MP3',
+      })
+      setSpeechAudioData(res.audio_data)
+      setSpeechAudioUrl(res.audio_url)
+      setSpeechAudioMeta({ chars: res.char_count, cost: res.cost, elapsed: res.elapsed })
+      setTimeout(() => speechAudioRef.current?.play().catch(() => {}), 100)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSpeechGenerating(false)
+    }
+  }
+
+  const handleSpeechAudioVideo = async () => {
+    if (!speechVideoImageUrl.trim() || !speechAudioUrl) return
+    setSpeechVideoLoading(true)
+    setError('')
+    setSpeechVideoData(null)
+    setSpeechVideoUrl('')
+    try {
+      const res = await playgroundAudioVideo({
+        image_url: speechVideoImageUrl,
+        audio_url: speechAudioUrl,
+        prompt: speechVideoPrompt || undefined,
+        resolution: speechVideoResolution,
+        draft: speechVideoDraft,
+      })
+      setSpeechVideoData(res.video_data)
+      setSpeechVideoUrl(res.video_url)
+      setSpeechVideoMeta({ cost: res.cost, elapsed: res.elapsed, prompt_used: res.prompt_used })
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSpeechVideoLoading(false)
+    }
+  }
+
+  const insertSpeechTag = (tag: string) => {
+    const ta = document.activeElement as HTMLTextAreaElement | null
+    if (ta && ta.tagName === 'TEXTAREA' && ta.dataset.speechprompt === '1') {
+      const start = ta.selectionStart
+      const end = ta.selectionEnd
+      const before = speechPrompt.slice(0, start)
+      const sel = speechPrompt.slice(start, end)
+      const after = speechPrompt.slice(end)
+      let inserted = tag
+      if (tag.includes('___')) {
+        // Wrapping tag (e.g. <whisper>___</whisper>)
+        inserted = tag.replace('___', sel || 'text')
+      }
+      const next = before + inserted + after
+      setSpeechPrompt(next)
+      setTimeout(() => {
+        ta.focus()
+        ta.setSelectionRange(start + inserted.length, start + inserted.length)
+      }, 0)
+    } else {
+      setSpeechPrompt((p) => p + (p.endsWith(' ') || !p ? '' : ' ') + tag.replace('___', 'text'))
+    }
+  }
+
+  const totalSpeechElapsed = (speechAudioMeta?.elapsed || 0) + (speechVideoMeta?.elapsed || 0)
+
   if (!config) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
@@ -342,6 +467,10 @@ export default function PlaygroundPage() {
               onClick={() => setMode('video')}
               className={`px-3 py-1 text-xs rounded-md transition-colors ${mode === 'video' ? 'bg-amber-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
             >Video</button>
+            <button
+              onClick={() => setMode('speech')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${mode === 'speech' ? 'bg-amber-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
+            >Speech</button>
           </div>
           <div className="flex-1" />
           <span className="text-[10px] text-neutral-600 font-mono">Z-Image Turbo</span>
@@ -426,6 +555,153 @@ export default function PlaygroundPage() {
                   <span className="text-xs text-neutral-400">Prompt upsampling</span>
                 </label>
               </div>
+            </>
+          )}
+
+          {mode === 'speech' && (
+            /* ── Speech mode ── */
+            <>
+              {/* Voice + Language */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">Voice</label>
+                  <select value={speechVoice} onChange={(e) => setSpeechVoice(e.target.value)}
+                    className="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:border-amber-600 focus:outline-none transition-colors">
+                    {(config.tts?.voices || [
+                      { id: 'eve', label: 'Eve' }, { id: 'ara', label: 'Ara' },
+                      { id: 'leo', label: 'Leo' }, { id: 'rex', label: 'Rex' },
+                      { id: 'sal', label: 'Sal' },
+                    ]).map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">Language</label>
+                  <select value={speechLanguage} onChange={(e) => setSpeechLanguage(e.target.value)}
+                    className="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:border-amber-600 focus:outline-none transition-colors">
+                    {(config.tts?.languages || ['auto', 'en', 'fr']).map((l) => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Step 1 — Concept */}
+              <div className="border border-amber-900/30 rounded-lg p-3 space-y-2 bg-amber-950/10">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  <label className="text-[10px] text-amber-400 uppercase tracking-wider font-medium">1. Concept</label>
+                </div>
+                <textarea value={speechConcept} onChange={(e) => setSpeechConcept(e.target.value)} rows={3}
+                  placeholder="What should be said? Plain text — Grok will add expression tags."
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-100 focus:border-amber-600 focus:outline-none resize-y placeholder-neutral-600 transition-colors" />
+                <div>
+                  <label className="text-[9px] text-neutral-600 uppercase">Direction (optional emotion brief)</label>
+                  <input value={speechBrief} onChange={(e) => setSpeechBrief(e.target.value)}
+                    placeholder="intimate, breathy, slow"
+                    className="w-full mt-0.5 bg-neutral-900 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-300 focus:border-amber-600 focus:outline-none placeholder-neutral-600" />
+                </div>
+                <button onClick={handleSpeechEnhance} disabled={speechEnhancing || !speechConcept.trim()}
+                  className="w-full bg-amber-700/70 hover:bg-amber-600 disabled:opacity-30 text-white py-2 rounded-lg text-xs font-medium transition-colors">
+                  {speechEnhancing ? 'Enhancing...' : 'Enhance with Grok →'}
+                </button>
+                {enhanceElapsed != null && (
+                  <p className="text-[9px] text-neutral-500 text-right">enhanced in {enhanceElapsed}s</p>
+                )}
+              </div>
+
+              {/* Step 2 — Editable expressive prompt */}
+              <div className="border border-purple-900/30 rounded-lg p-3 space-y-2 bg-purple-950/10">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                    <label className="text-[10px] text-purple-400 uppercase tracking-wider font-medium">2. Speech prompt (editable)</label>
+                  </div>
+                  <span className="text-[9px] text-neutral-600 font-mono">{speechPrompt.length} chars</span>
+                </div>
+                <textarea value={speechPrompt} data-speechprompt="1"
+                  onChange={(e) => setSpeechPrompt(e.target.value)} rows={6}
+                  placeholder="Click 'Enhance with Grok' or type the speech prompt directly. Use [pause], [laugh], <whisper>...</whisper>, etc."
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-200 font-mono leading-relaxed focus:border-purple-600 focus:outline-none resize-y placeholder-neutral-600 transition-colors" />
+                {/* Tag inserter */}
+                <div className="space-y-1">
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-[9px] text-neutral-600 mr-1 self-center">inline:</span>
+                    {[
+                      'pause', 'long-pause', 'breath', 'inhale', 'exhale', 'sigh',
+                      'laugh', 'chuckle', 'giggle', 'cry', 'tsk', 'tongue-click', 'lip-smack', 'hum-tune',
+                    ].map((t) => (
+                      <button key={t} onClick={() => insertSpeechTag(`[${t}]`)}
+                        className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 hover:bg-purple-900/50 text-neutral-400 hover:text-purple-300 font-mono transition-colors">
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-[9px] text-neutral-600 mr-1 self-center">wrap:</span>
+                    {[
+                      'soft', 'whisper', 'loud', 'slow', 'fast',
+                      'higher-pitch', 'lower-pitch', 'build-intensity', 'decrease-intensity',
+                      'emphasis', 'sing-song', 'singing', 'laugh-speak',
+                    ].map((t) => (
+                      <button key={t} onClick={() => insertSpeechTag(`<${t}>___</${t}>`)}
+                        className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 hover:bg-cyan-900/50 text-neutral-400 hover:text-cyan-300 font-mono transition-colors">
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={handleSpeechGenerate} disabled={speechGenerating || (!speechPrompt.trim() && !speechConcept.trim())}
+                  className="w-full bg-purple-700 hover:bg-purple-600 disabled:opacity-30 text-white py-2 rounded-lg text-xs font-medium transition-colors">
+                  {speechGenerating ? 'Generating audio...' : 'Generate Audio'}
+                </button>
+              </div>
+
+              {/* Step 3 — Lip-sync (only when audio is ready) */}
+              {speechAudioUrl && (
+                <div className="border border-cyan-900/30 rounded-lg p-3 space-y-2 bg-cyan-950/10">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                    <label className="text-[10px] text-cyan-400 uppercase tracking-wider font-medium">3. Audio-to-video (P-Video)</label>
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-neutral-600 uppercase">Source image URL</label>
+                    <input value={speechVideoImageUrl} onChange={(e) => setSpeechVideoImageUrl(e.target.value)}
+                      placeholder="https://... portrait of the speaker"
+                      className="w-full mt-0.5 bg-neutral-900 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-300 focus:border-cyan-600 focus:outline-none placeholder-neutral-600" />
+                    {speechVideoImageUrl && (
+                      <img src={speechVideoImageUrl} alt="Source"
+                        className="mt-1.5 max-h-32 rounded border border-neutral-800"
+                        onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-neutral-600 uppercase">Visual prompt (optional)</label>
+                    <textarea value={speechVideoPrompt} onChange={(e) => setSpeechVideoPrompt(e.target.value)} rows={2}
+                      placeholder="auto: speaking naturally — or describe motion, expression, lighting..."
+                      className="w-full mt-0.5 bg-neutral-900 border border-neutral-800 rounded px-2 py-1.5 text-[11px] text-neutral-300 font-mono focus:border-cyan-600 focus:outline-none resize-y placeholder-neutral-600" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-neutral-600 uppercase">Resolution</label>
+                      <select value={speechVideoResolution} onChange={(e) => setSpeechVideoResolution(e.target.value)}
+                        className="w-full mt-0.5 bg-neutral-900 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-300 focus:border-cyan-600 focus:outline-none">
+                        <option value="720p">720p</option>
+                        <option value="1080p">1080p</option>
+                      </select>
+                    </div>
+                    <label className="flex items-end gap-2 cursor-pointer pb-1.5">
+                      <input type="checkbox" checked={speechVideoDraft} onChange={(e) => setSpeechVideoDraft(e.target.checked)}
+                        className="rounded bg-neutral-800 border-neutral-700 text-cyan-500 w-3.5 h-3.5" />
+                      <span className="text-[10px] text-neutral-400">Draft</span>
+                    </label>
+                  </div>
+                  <p className="text-[9px] text-neutral-600">P-Video generates ambient motion with audio attached — not true lip-sync.</p>
+                  <button onClick={handleSpeechAudioVideo} disabled={speechVideoLoading || !speechVideoImageUrl.trim()}
+                    className="w-full bg-cyan-700 hover:bg-cyan-600 disabled:opacity-30 text-white py-2 rounded-lg text-xs font-medium transition-colors">
+                    {speechVideoLoading ? 'Generating lip-synced video...' : 'Generate Lip-Synced Video'}
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -525,7 +801,7 @@ export default function PlaygroundPage() {
                 {useSimOverrides && <LoraEditor loras={simLoraOverrides} available={config.loras} onChange={setSimLoraOverrides} />}
               </div>
             </>
-          ) : (
+          ) : mode === 'manual' ? (
             /* ── Manual mode ── */
             <>
               {/* Backend selector */}
@@ -640,9 +916,10 @@ export default function PlaygroundPage() {
                 )}
               </div>
             </>
-          )}
+          ) : null}
 
-          {/* ── Shared: Resolution / Steps / CFG / Seed ── */}
+          {/* ── Shared: Resolution / Steps / CFG / Seed ── (image modes only) */}
+          {(mode === 'simulate' || mode === 'manual') && (
           <div className="grid grid-cols-5 gap-2">
             {[
               { label: 'Width', value: width, set: setWidth, step: 64, min: 256, max: 2048 },
@@ -663,6 +940,7 @@ export default function PlaygroundPage() {
                 className="w-full mt-1 bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2 text-sm text-neutral-100 focus:border-amber-600 focus:outline-none placeholder-neutral-600 transition-colors" />
             </div>
           </div>
+          )}
 
           {/* Action buttons */}
           {mode === 'simulate' ? (
@@ -681,12 +959,12 @@ export default function PlaygroundPage() {
               className="w-full bg-amber-700 hover:bg-amber-600 disabled:opacity-30 text-white py-2.5 rounded-lg text-sm font-medium transition-colors">
               {loading ? 'Generating...' : 'Generate Image'}
             </button>
-          ) : (
+          ) : mode === 'video' ? (
             <button onClick={handleVideoGenerate} disabled={videoLoading || !videoImageUrl.trim()}
               className="w-full bg-purple-700 hover:bg-purple-600 disabled:opacity-30 text-white py-2.5 rounded-lg text-sm font-medium transition-colors">
               {videoLoading ? 'Generating video...' : 'Generate Video'}
             </button>
-          )}
+          ) : null}
 
           {error && (
             <div className="bg-red-950/30 border border-red-900/50 rounded-lg px-3 py-2 text-xs text-red-400">{error}</div>
@@ -722,7 +1000,79 @@ export default function PlaygroundPage() {
 
         {/* ── Right panel: Results ── */}
         <div ref={resultRef} className="flex-1 min-w-0 space-y-4 mt-6 lg:mt-0">
-          {mode === 'video' && videoResult ? (
+          {mode === 'speech' ? (
+            <div className="space-y-4">
+              {/* Total time tracker */}
+              {(speechAudioMeta || speechVideoMeta) && (
+                <div className="flex items-center gap-3 text-[11px] font-mono text-neutral-400 bg-neutral-900/50 border border-neutral-800/50 rounded-lg px-3 py-2">
+                  <span className="text-neutral-500">Time:</span>
+                  {enhanceElapsed != null && <span>enhance {enhanceElapsed}s</span>}
+                  {speechAudioMeta && <span className="text-purple-300">tts {speechAudioMeta.elapsed}s</span>}
+                  {speechVideoMeta && <span className="text-cyan-300">video {speechVideoMeta.elapsed}s</span>}
+                  <span className="ml-auto text-amber-300">total {(((enhanceElapsed || 0) + totalSpeechElapsed)).toFixed(1)}s</span>
+                </div>
+              )}
+
+              {/* Audio result */}
+              {speechAudioData ? (
+                <div className="rounded-lg bg-neutral-900 border border-neutral-800/50 p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                    <label className="text-[10px] text-purple-400 uppercase tracking-wider font-medium">Speech audio</label>
+                    <span className="text-[9px] text-neutral-600 font-mono ml-auto">
+                      {speechAudioMeta?.chars}c · ${speechAudioMeta?.cost.toFixed(4)} · {speechAudioMeta?.elapsed}s
+                    </span>
+                  </div>
+                  <audio ref={speechAudioRef} src={speechAudioData} controls className="w-full" />
+                  {speechAudioUrl && (
+                    <a href={speechAudioUrl} target="_blank" rel="noreferrer"
+                      className="text-[10px] text-neutral-500 hover:text-amber-400 transition-colors font-mono break-all">
+                      {speechAudioUrl}
+                    </a>
+                  )}
+                </div>
+              ) : speechGenerating ? (
+                <div className="rounded-lg bg-neutral-900/30 border border-neutral-800/30 p-12 text-center">
+                  <div className="w-6 h-6 border-2 border-neutral-700 border-t-purple-500 rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-neutral-500 text-sm">Generating speech...</p>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-neutral-900/30 border border-neutral-800/30 border-dashed p-12 text-center">
+                  <div className="text-neutral-700 text-3xl mb-2">&#9836;</div>
+                  <p className="text-neutral-600 text-sm">
+                    Type a concept, optionally enhance with Grok, then generate speech.
+                  </p>
+                </div>
+              )}
+
+              {/* Video result */}
+              {speechVideoData ? (
+                <div className="rounded-lg bg-neutral-900 border border-neutral-800/50 overflow-hidden">
+                  <video src={speechVideoData} controls autoPlay loop className="w-full h-auto" style={{ maxHeight: '60vh' }} />
+                  <div className="px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
+                    <div className="flex items-center gap-3 text-[10px] text-neutral-400 font-mono flex-wrap">
+                      <span>{speechVideoMeta?.elapsed}s</span>
+                      {speechVideoMeta && speechVideoMeta.cost > 0 && (
+                        <span className="text-green-400">${speechVideoMeta.cost.toFixed(3)}</span>
+                      )}
+                      <span className="text-cyan-400">P-Video lip-sync</span>
+                    </div>
+                    {speechVideoMeta?.prompt_used && (
+                      <pre className="mt-2 text-[10px] text-neutral-500 font-mono leading-relaxed whitespace-pre-wrap max-h-24 overflow-y-auto">
+                        {speechVideoMeta.prompt_used}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+              ) : speechVideoLoading ? (
+                <div className="rounded-lg bg-neutral-900/30 border border-neutral-800/30 p-8 text-center">
+                  <div className="w-6 h-6 border-2 border-neutral-700 border-t-cyan-500 rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-neutral-500 text-sm">Generating lip-synced video...</p>
+                  <p className="text-neutral-600 text-xs mt-1">P-Video typically 20–60s</p>
+                </div>
+              ) : null}
+            </div>
+          ) : mode === 'video' && videoResult ? (
             <div className="space-y-4">
               {videoResult.video_data ? (
                 <div className="relative rounded-lg overflow-hidden bg-neutral-900 border border-neutral-800/50">

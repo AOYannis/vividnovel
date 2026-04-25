@@ -495,6 +495,10 @@ export async function fetchPlaygroundConfig(): Promise<{
   loras: { id: string; name: string; type: string }[]
   defaults: { width: number; height: number; steps: number }
   languages: string[]
+  tts?: {
+    voices: { id: string; label: string }[]
+    languages: string[]
+  }
 }> {
   const res = await fetch(`${BASE}/api/playground/config`)
   if (!res.ok) throw new Error('Failed to fetch playground config')
@@ -615,6 +619,78 @@ export async function manualGenerate(params: {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || 'Manual generation failed')
+  }
+  return res.json()
+}
+
+export async function playgroundTTSEnhance(params: {
+  text: string
+  voice?: string
+  language?: string
+  brief?: string
+}): Promise<{ enhanced_text: string; elapsed: number }> {
+  const res = await fetch(`${BASE}/api/playground/tts/enhance`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'TTS enhancement failed')
+  }
+  return res.json()
+}
+
+export async function playgroundTTS(params: {
+  text: string
+  voice?: string
+  language?: string
+  output_format?: string
+}): Promise<{
+  audio_url: string
+  audio_data: string | null
+  voice: string
+  language: string
+  char_count: number
+  cost: number
+  elapsed: number
+}> {
+  const res = await fetch(`${BASE}/api/playground/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'TTS failed')
+  }
+  return res.json()
+}
+
+export async function playgroundAudioVideo(params: {
+  image_url: string
+  audio_url: string
+  prompt?: string
+  resolution?: string
+  fps?: number
+  draft?: boolean
+  seed?: number | null
+}): Promise<{
+  video_url: string
+  video_data: string | null
+  prompt_used: string
+  cost: number
+  elapsed: number
+  generation_time: number
+}> {
+  const res = await fetch(`${BASE}/api/playground/audio_video`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Audio-to-video failed')
   }
   return res.json()
 }

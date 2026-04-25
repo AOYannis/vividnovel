@@ -1393,6 +1393,20 @@ async def playground_config():
         "loras": AVAILABLE_LORAS,
         "defaults": {"width": IMAGE_WIDTH, "height": IMAGE_HEIGHT, "steps": IMAGE_STEPS},
         "languages": list(SUPPORTED_LANGUAGES.keys()),
+        "tts": {
+            "voices": [
+                {"id": "eve", "label": "Eve (warm female)"},
+                {"id": "ara", "label": "Ara (smooth female)"},
+                {"id": "leo", "label": "Leo (warm male)"},
+                {"id": "rex", "label": "Rex (deep male)"},
+                {"id": "sal", "label": "Sal (neutral)"},
+            ],
+            "languages": [
+                "auto", "en", "fr", "es-ES", "es-MX", "de", "it", "pt-BR", "pt-PT",
+                "ja", "ko", "zh", "ru", "tr", "vi", "id", "hi", "bn",
+                "ar-EG", "ar-SA", "ar-AE",
+            ],
+        },
     }
 
 
@@ -1946,4 +1960,251 @@ async def playground_video(req: PlaygroundVideoRequest):
         "elapsed": elapsed,
         "prompt_used": davinci_prompt,
         "simulated": result.get("simulated", False),
+    }
+
+
+# ─── Speech & Lip-Sync Playground ────────────────────────────────────────────
+
+class TTSEnhanceRequest(BaseModel):
+    text: str                       # raw user concept
+    voice: str = "eve"
+    language: str = "en"
+    brief: str = ""                 # optional emotion/scene brief
+
+
+_TTS_TAG_GUIDE = """xAI TTS reads the input LITERALLY — anything that isn't a recognized tag is spoken aloud,
+including parentheses, asterisks, ALL CAPS, ellipses, hyphens, and stage directions.
+The ONLY way to add expression is via the tags below.
+
+INLINE TAGS — place at the exact moment the sound occurs (no wrapping):
+  [pause]            short silence
+  [long-pause]       longer silence
+  [breath]           audible breath
+  [inhale]           sharp/deep inhale
+  [exhale]           audible exhale (great for tension release)
+  [sigh]             a sigh
+  [laugh]            short laugh
+  [chuckle]          quiet amused laugh
+  [giggle]           light playful laugh
+  [cry]              sob / cry
+  [tsk]              tongue-against-teeth disapproval
+  [tongue-click]     tongue click
+  [lip-smack]        lip smack
+  [hum-tune]         brief hummed melody
+
+WRAPPING TAGS — wrap the affected text:
+  <soft>...</soft>                          hushed, gentle
+  <whisper>...</whisper>                    quiet, intimate
+  <loud>...</loud>                          raised volume
+  <slow>...</slow>                          slower delivery
+  <fast>...</fast>                          rapid delivery
+  <higher-pitch>...</higher-pitch>          lifted pitch
+  <lower-pitch>...</lower-pitch>            dropped pitch
+  <build-intensity>...</build-intensity>    crescendo across the wrapped span
+  <decrease-intensity>...</decrease-intensity>   diminuendo across the wrapped span
+  <emphasis>...</emphasis>                  stress the wrapped word(s)
+  <sing-song>...</sing-song>                playful sing-song melody
+  <singing>...</singing>                    actually sung
+  <laugh-speak>...</laugh-speak>            speech mixed with laughter
+
+ABSOLUTE RULES — violate any of these and the output is broken:
+1. Do NOT use parentheses (softly), asterisks *sighs*, brackets [softly], em-dashes for direction,
+   or ANY stage-direction notation outside the tag list above. These will be SPOKEN LITERALLY.
+2. Do NOT add narration, character names, "she said", or any words the speaker would not say.
+3. Do NOT translate. Keep the source language exactly.
+4. Layer tags to be expressive: combine wrapping (e.g. <whisper>) with inline (e.g. [breath], [exhale])
+   to create real emotion — a flat sentence with one tag is a wasted opportunity. Aim for 3-7 tags
+   in a typical 1-3 sentence prompt.
+5. Match the tags to the Direction the user gave (intimate → <whisper>+[breath]+<slow>;
+   building tension → <build-intensity>+[inhale]; teasing → <sing-song>+[chuckle]; etc.).
+6. Output ONLY the rewritten spoken text with tags. No preamble, no explanation, no quotes around it.
+"""
+
+
+@app.post("/api/playground/tts/enhance")
+async def playground_tts_enhance(req: TTSEnhanceRequest):
+    """Use Grok to rewrite plain text into an expressive xAI-TTS-tagged prompt."""
+    import time as _time
+
+    start = _time.time()
+    sys_msg = (
+        "You are a voice direction assistant. Rewrite the user's text into an "
+        "expressive prompt for xAI Text-to-Speech.\n\n" + _TTS_TAG_GUIDE
+    )
+    user_msg = f"Voice: {req.voice}\nLanguage: {req.language}\n"
+    if req.brief.strip():
+        user_msg += f"Direction: {req.brief.strip()}\n"
+    user_msg += f"\nText:\n{req.text.strip()}"
+
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=GROK_MODEL,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.7,
+            max_tokens=1200,
+        )
+        enhanced = resp.choices[0].message.content.strip()
+        # Strip surrounding quotes/code-fences if Grok added any
+        if enhanced.startswith("```") and enhanced.endswith("```"):
+            enhanced = enhanced.strip("`").strip()
+        if (enhanced.startswith('"') and enhanced.endswith('"')) or (enhanced.startswith("'") and enhanced.endswith("'")):
+            enhanced = enhanced[1:-1].strip()
+    except Exception as e:
+        raise HTTPException(500, f"Grok enhancement failed: {e}")
+
+    return {"enhanced_text": enhanced, "elapsed": round(_time.time() - start, 2)}
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "eve"
+    language: str = "en"
+    output_format: str = "MP3"      # MP3 | WAV | FLAC | OGG
+
+
+@app.post("/api/playground/tts")
+async def playground_tts(req: TTSRequest):
+    """Generate speech audio via Runware xAI TTS. Returns hosted URL + base64."""
+    import time as _time
+    import uuid as _uuid
+    from runware import IAudioInference, IAudioSpeech
+
+    if runware_client is None:
+        raise HTTPException(503, "Runware client not connected")
+    if not req.text.strip():
+        raise HTTPException(400, "text is required")
+
+    start = _time.time()
+    try:
+        request = IAudioInference(
+            taskUUID=str(_uuid.uuid4()),
+            model="xai:tts@0",
+            speech=IAudioSpeech(
+                text=req.text,
+                voice=req.voice,
+                language=req.language,
+            ),
+            outputType="URL",
+            outputFormat=req.output_format,
+            includeCost=True,
+            deliveryMethod="sync",
+        )
+        result = await runware_client.audioInference(requestAudio=request)
+    except Exception as e:
+        raise HTTPException(500, f"TTS generation failed: {e}")
+
+    if isinstance(result, list):
+        audio = result[0] if result else None
+    else:
+        audio = result
+    if audio is None:
+        raise HTTPException(500, "TTS returned no audio")
+
+    audio_url = getattr(audio, "audioURL", None) or ""
+    audio_b64 = getattr(audio, "audioBase64Data", None) or ""
+    cost = float(getattr(audio, "cost", 0) or 0)
+
+    # If Runware didn't return base64, fetch the URL once so the UI can play it instantly
+    if not audio_b64 and audio_url:
+        import aiohttp, base64 as _b64
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(audio_url) as r:
+                    audio_b64 = _b64.b64encode(await r.read()).decode()
+        except Exception:
+            pass
+
+    mime = {"MP3": "audio/mpeg", "WAV": "audio/wav", "FLAC": "audio/flac", "OGG": "audio/ogg"}.get(req.output_format, "audio/mpeg")
+    return {
+        "audio_url": audio_url,
+        "audio_data": f"data:{mime};base64,{audio_b64}" if audio_b64 else None,
+        "voice": req.voice,
+        "language": req.language,
+        "char_count": len(req.text),
+        "cost": cost,
+        "elapsed": round(_time.time() - start, 2),
+    }
+
+
+class AudioVideoRequest(BaseModel):
+    image_url: str
+    audio_url: str
+    prompt: str = ""
+    resolution: str = "720p"   # "720p" | "1080p"
+    fps: int = 24
+    draft: bool = False
+    seed: Optional[int] = None
+
+
+@app.post("/api/playground/audio_video")
+async def playground_audio_video(req: AudioVideoRequest):
+    """Audio-to-video via Runware P-Video. Pass image (first frame) + audio URL.
+    NOTE: P-Video is not a true lip-sync model — it generates ambient motion with
+    the audio attached to the output. For real lip-sync from a still image, use a
+    dedicated talking-head model (e.g. KlingAI Avatar)."""
+    import time as _time
+    import uuid as _uuid
+    import base64 as _b64
+    import aiohttp
+    from runware import IVideoInference, IVideoInputs, ISettings, IAsyncTaskResponse, IInputFrame
+
+    if runware_client is None:
+        raise HTTPException(503, "Runware client not connected")
+    if not req.image_url.strip() or not req.audio_url.strip():
+        raise HTTPException(400, "image_url and audio_url are required")
+
+    prompt = req.prompt.strip() or "a person speaking naturally to the camera, expressive face, subtle motion"
+    start = _time.time()
+
+    try:
+        request = IVideoInference(
+            taskUUID=str(_uuid.uuid4()),
+            model="prunaai:p-video@0",
+            positivePrompt=prompt,
+            resolution=req.resolution,
+            fps=req.fps,
+            seed=req.seed,
+            outputFormat="MP4",
+            includeCost=True,
+            inputs=IVideoInputs(
+                frameImages=[IInputFrame(image=req.image_url, frame="first")],
+                audio=req.audio_url,
+            ),
+            settings=ISettings(audio=True, draft=req.draft, promptUpsampling=True),
+        )
+        result = await runware_client.videoInference(requestVideo=request)
+        if isinstance(result, IAsyncTaskResponse):
+            videos = await runware_client.getResponse(taskUUID=result.taskUUID)
+        else:
+            videos = result
+    except Exception as e:
+        raise HTTPException(500, f"Audio-to-video generation failed: {e}")
+
+    if not videos:
+        raise HTTPException(500, "P-Video returned no video")
+    vid = videos[0]
+    video_url = getattr(vid, "videoURL", None) or ""
+    cost = sum(float(getattr(v, "cost", 0) or 0) for v in videos)
+
+    # Fetch bytes for instant inline playback
+    video_b64 = ""
+    if video_url:
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(video_url) as r:
+                    video_b64 = _b64.b64encode(await r.read()).decode()
+        except Exception:
+            pass
+
+    elapsed = round(_time.time() - start, 1)
+    return {
+        "video_url": video_url,
+        "video_data": f"data:video/mp4;base64,{video_b64}" if video_b64 else None,
+        "prompt_used": prompt,
+        "cost": cost,
+        "elapsed": elapsed,
+        "generation_time": elapsed,
     }
