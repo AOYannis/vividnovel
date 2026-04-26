@@ -371,7 +371,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
             set({
               images: state.images.map((img) =>
                 img.index === event.index
-                  ? { ...img, sceneAudioUrl: event.url, sceneAudioData: event.audio_data || undefined }
+                  ? { ...img, sceneAudioUrl: event.url, sceneAudioData: event.audio_data || undefined, sceneAudioForVideoOnly: !!event.for_video_only }
                   : img
               ),
             })
@@ -383,7 +383,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
           if (seq.sequenceNumber === audioSeqNum) {
             seq.images = seq.images.map((img) =>
               img.index === event.index
-                ? { ...img, sceneAudioUrl: event.url, sceneAudioData: event.audio_data || undefined }
+                ? { ...img, sceneAudioUrl: event.url, sceneAudioData: event.audio_data || undefined, sceneAudioForVideoOnly: !!event.for_video_only }
                 : img
             )
             set({ completedSequences: completedAudio })
@@ -494,12 +494,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     sequenceNumber: state.sequenceNumber,
     narrationSegments: state.narrationSegments,
     // Strip large data URLs (base64 videos/images) to stay within localStorage quota
-    images: state.images.map(({ sceneVideoUrl, sceneAudioData, ...img }) => img),
+    images: state.images.map(({ sceneVideoUrl, sceneAudioData, sceneAudioForVideoOnly, ...img }) => img),
     choices: state.choices,
     currentScene: state.currentScene,
     completedSequences: state.completedSequences.map(({ videoUrl, ...seq }) => ({
       ...seq,
-      images: seq.images.map(({ sceneVideoUrl, sceneAudioData, ...img }) => img),
+      images: seq.images.map(({ sceneVideoUrl, sceneAudioData, sceneAudioForVideoOnly, ...img }) => img),
     })),
     sceneChats: Object.fromEntries(
       Object.entries(state.sceneChats).map(([k, v]) => [k, { ...v, adaptedImageUrl: undefined }])

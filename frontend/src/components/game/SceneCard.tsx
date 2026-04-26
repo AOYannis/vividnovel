@@ -176,10 +176,11 @@ export default function SceneCard({
   const soundPlayCount = useRef(0) // how many loops have played with sound
 
   // ── Standalone TTS narration audio ──
-  // Skip standalone playback once a video arrives — the video already carries the audio
-  // (either the TTS via voice_to_video or P-Video's auto-generated soundtrack).
+  // Skip standalone playback when:
+  // - the audio was generated only for the video lip-sync (dialogue-only TTS, voice_to_video=true)
+  // - or the video has already arrived (its soundtrack covers the scene)
   const sceneAudioSrc = image.sceneAudioData || image.sceneAudioUrl
-  const playStandaloneAudio = !!sceneAudioSrc && !image.sceneVideoUrl
+  const playStandaloneAudio = !!sceneAudioSrc && !image.sceneVideoUrl && !image.sceneAudioForVideoOnly
   useEffect(() => {
     const a = sceneAudioRef.current
     if (!a || !playStandaloneAudio) return

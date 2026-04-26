@@ -1444,14 +1444,26 @@ class StoryEngine:
         sse_queue: asyncio.Queue, sequence_number: int,
         voice: str, language: str, enhance: bool,
         session_id: str,
+        dialogue_only: bool = False,
+        for_video_only: bool = False,
     ) -> str:
-        """Generate TTS for a scene's narration, emit scene_audio_ready, return audio URL."""
-        from tts import enhance_speech_text, generate_speech
+        """Generate TTS for a scene's narration, emit scene_audio_ready, return audio URL.
+        - dialogue_only: extract only quoted dialogue from the narration before TTS
+          (used when feeding the audio into video lip-sync — narration prose isn't spoken).
+        - for_video_only: tell the UI not to play this clip standalone (it lives in the video)."""
+        from tts import enhance_speech_text, generate_speech, extract_dialogue
         audio_url = ""
         try:
             text = (narration_text or "").strip()
             if not text:
                 return ""
+            if dialogue_only:
+                dlg = extract_dialogue(text)
+                if dlg:
+                    text = dlg
+                else:
+                    # No quoted lines → fall back to full narration so the video still gets audio
+                    print(f"[tts] Scene {scene_index}: dialogue_only requested but no quoted lines, using full narration")
             spoken = text
             enhance_elapsed = 0.0
             if enhance:
@@ -1463,7 +1475,8 @@ class StoryEngine:
                 except Exception as e:
                     print(f"[tts] Scene {scene_index}: enhance failed — {e}, falling back to raw text")
                     spoken = text
-            print(f"[tts] Scene {scene_index} (seq {sequence_number}): generating {voice}/{language} ({len(spoken)}c, enhance={enhance_elapsed}s)...")
+            mode_tag = "dialogue" if dialogue_only else "narration"
+            print(f"[tts] Scene {scene_index} (seq {sequence_number}): generating {mode_tag} {voice}/{language} ({len(spoken)}c, enhance={enhance_elapsed}s)...")
             res = await generate_speech(self.runware, spoken, voice=voice, language=language)
             audio_url = res.get("audio_url", "") or ""
             print(f"[tts] Scene {scene_index}: done in {res.get('elapsed')}s (${res.get('cost', 0):.4f})")
@@ -1479,6 +1492,8 @@ class StoryEngine:
                 "cost": res.get("cost", 0),
                 "generation_time": res.get("elapsed", 0),
                 "enhanced_text": spoken if enhance else None,
+                "for_video_only": for_video_only,
+                "dialogue_only": dialogue_only,
             })
             if session_id and audio_url:
                 import db as _db
@@ -1506,6 +1521,8 @@ class StoryEngine:
         sse_queue: asyncio.Queue, sequence_number: int,
         voice: str = "ara", language: str = "fr", enhance: bool = True,
         session_id: str = "",
+        dialogue_only: bool = False,
+        for_video_only: bool = False,
     ) -> asyncio.Task:
         """Launch a TTS task for the given scene's narration. Returns the task so the
         caller can await the audio URL (e.g. for voice-to-video chaining)."""
@@ -1516,6 +1533,7 @@ class StoryEngine:
         task = asyncio.create_task(self._fire_tts_task(
             scene_index, narration_text, sse_queue, sequence_number,
             voice, language, enhance, session_id,
+            dialogue_only=dialogue_only, for_video_only=for_video_only,
         ))
         StoryEngine._tts_tasks.append(task)
         return task
@@ -1578,6 +1596,15 @@ class StoryEngine:
             _session_id = session.id if session else ""
             narration_text_for_tts = narration_segments[idx] if (narration_segments and idx < len(narration_segments)) else ""
 
+            # Decide TTS mode based on whether this scene will lip-sync video to it:
+            # - voice_to_video=True AND scene has a video → dialogue-only audio drives the video,
+            #   no standalone playback (the video carries the audio).
+            # - Otherwise → full narration, played standalone on still scenes.
+            scene_will_have_video = (
+                video_backend != "none" and bool(result.get("url")) and narration_segments
+            )
+            use_dialogue_only = bool(voice_to_video and scene_will_have_video and video_backend == "pvideo")
+
             tts_task: asyncio.Task | None = None
             if voice_narration and narration_text_for_tts.strip():
                 tts_task = self._launch_tts(
@@ -1585,6 +1612,8 @@ class StoryEngine:
                     sequence_number=_seq_num,
                     voice=voice_id, language=voice_lang, enhance=voice_enhance,
                     session_id=_session_id,
+                    dialogue_only=use_dialogue_only,
+                    for_video_only=use_dialogue_only,
                 )
 
             if result.get("url") and narration_segments and video_backend != "none":

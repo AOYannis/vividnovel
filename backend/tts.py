@@ -65,6 +65,19 @@ ABSOLUTE RULES — violate any of these and the output is broken:
 """
 
 
+_DIALOGUE_RE = __import__("re").compile(r"[«\"“]([^»\"”]+)[»\"”]")
+
+
+def extract_dialogue(text: str) -> str:
+    """Pull out only the dialogue lines from a narration block.
+    Matches French «…», curly "…", and straight \"…\" quotes.
+    Returns the joined dialogue text (one line per quote), or '' if none found."""
+    if not text:
+        return ""
+    lines = [m.group(1).strip() for m in _DIALOGUE_RE.finditer(text)]
+    return "\n".join(line for line in lines if line)
+
+
 async def enhance_speech_text(
     grok_client,
     text: str,
