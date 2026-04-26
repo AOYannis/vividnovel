@@ -128,6 +128,11 @@ export async function startGame(params: {
   video_start_scene?: number
   pvideo_prompt_upsampling?: boolean
   custom_character_desc?: string
+  voice_narration?: boolean
+  voice_to_video?: boolean
+  voice_id?: string
+  voice_language?: string
+  voice_enhance?: boolean
 }) {
   const res = await apiFetch(`/api/game/start`, {
     method: 'POST',

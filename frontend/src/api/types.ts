@@ -38,6 +38,8 @@ export type SSEEvent =
   | { type: 'debug_context'; system_prompt_length: number; persistent_memory: string; narrative_memory: string; grok_model: string; sequence_number: number }
   | { type: 'scene_video_ready'; index: number; sequence_number: number; url: string; generation_time: number; job_id: string }
   | { type: 'scene_video_error'; index: number; error: string }
+  | { type: 'scene_audio_ready'; index: number; sequence_number: number; url: string; audio_data?: string | null; voice: string; language: string; char_count: number; cost: number; generation_time: number; enhanced_text?: string | null }
+  | { type: 'scene_audio_error'; index: number; error: string }
   | { type: 'error'; message: string }
 
 export interface RelationshipData {
@@ -97,6 +99,8 @@ export interface ImageSlot {
   url?: string
   sceneVideoUrl?: string  // Davinci talking-head video for this scene
   sceneVideoSimulated?: boolean  // true when Davinci is in simulate mode (no real video)
+  sceneAudioUrl?: string         // xAI TTS narration audio for this scene
+  sceneAudioData?: string        // data:audio/mpeg;base64,... for instant playback
   prompt?: string
   cost?: number
   seed?: number

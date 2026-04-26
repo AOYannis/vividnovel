@@ -40,6 +40,12 @@ export default function SetupPage() {
   const [videoDraftMode, setVideoDraftMode] = useState(true)
   const [videoStartScene, setVideoStartScene] = useState(0)  // 0=all, 4=last 4 only
   const [pvideoPromptUpsampling, setPvideoPromptUpsampling] = useState<'default' | 'on' | 'off'>('default')
+  // Voice / TTS settings
+  const [voiceNarration, setVoiceNarration] = useState(false)
+  const [voiceToVideo, setVoiceToVideo] = useState(false)
+  const [voiceId, setVoiceId] = useState('ara')
+  const [voiceLanguage, setVoiceLanguage] = useState('fr')
+  const [voiceEnhance, setVoiceEnhance] = useState(true)
 
   // Grok model selection
   const [grokModels, setGrokModels] = useState<GrokModel[]>([])
@@ -297,6 +303,11 @@ export default function SetupPage() {
         video_start_scene: videoStartScene || undefined,
         pvideo_prompt_upsampling: pvideoPromptUpsampling === 'default' ? undefined : pvideoPromptUpsampling === 'on',
         custom_character_desc: selectedActors.includes('custom') ? customCharacterDesc || undefined : undefined,
+        voice_narration: voiceNarration || undefined,
+        voice_to_video: voiceToVideo || undefined,
+        voice_id: voiceNarration ? voiceId : undefined,
+        voice_language: voiceNarration ? voiceLanguage : undefined,
+        voice_enhance: voiceNarration ? voiceEnhance : undefined,
       })
       store.startSession(result.session_id)
     } catch (err) {
@@ -1215,6 +1226,61 @@ export default function SetupPage() {
                   </p>
                 </div>
               )}
+
+              {/* ── Voice / TTS narration ── */}
+              <div className="bg-neutral-900 border border-amber-900/40 rounded-xl px-4 py-3.5 md:py-3 space-y-3">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-medium text-amber-300">Voice narration (xAI TTS)</div>
+                    <div className="text-[10px] text-neutral-500 mt-0.5">Each scene is read aloud with expressive tags ([sigh], &lt;whisper&gt;, etc.)</div>
+                  </div>
+                  <input type="checkbox" checked={voiceNarration} onChange={(e) => setVoiceNarration(e.target.checked)}
+                    className="rounded bg-neutral-800 border-neutral-700 text-amber-500 w-4 h-4" />
+                </label>
+                {voiceNarration && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-neutral-500 uppercase tracking-wider">Voice</label>
+                        <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}
+                          className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:border-amber-600 focus:outline-none">
+                          <option value="ara">Ara (smooth female)</option>
+                          <option value="eve">Eve (warm female)</option>
+                          <option value="leo">Leo (warm male)</option>
+                          <option value="rex">Rex (deep male)</option>
+                          <option value="sal">Sal (neutral)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-neutral-500 uppercase tracking-wider">Language</label>
+                        <select value={voiceLanguage} onChange={(e) => setVoiceLanguage(e.target.value)}
+                          className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:border-amber-600 focus:outline-none">
+                          {['auto', 'fr', 'en', 'es-ES', 'es-MX', 'de', 'it', 'pt-BR', 'pt-PT', 'ja', 'ko', 'zh', 'ru', 'tr', 'vi', 'id', 'hi', 'bn', 'ar-EG', 'ar-SA', 'ar-AE'].map((l) => (
+                            <option key={l} value={l}>{l}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <label className="flex items-center justify-between cursor-pointer pt-1">
+                      <div>
+                        <div className="text-xs text-neutral-300">Pre-enhance with Grok</div>
+                        <div className="text-[10px] text-neutral-500">Adds expressive tags before TTS (~+1s/scene)</div>
+                      </div>
+                      <input type="checkbox" checked={voiceEnhance} onChange={(e) => setVoiceEnhance(e.target.checked)}
+                        className="rounded bg-neutral-800 border-neutral-700 text-amber-500 w-4 h-4" />
+                    </label>
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <div>
+                        <div className="text-xs text-neutral-300">Use voice as video soundtrack</div>
+                        <div className="text-[10px] text-neutral-500">P-Video uses the TTS audio (lip-sync) — video waits for audio</div>
+                      </div>
+                      <input type="checkbox" checked={voiceToVideo} onChange={(e) => setVoiceToVideo(e.target.checked)}
+                        disabled={videoBackend !== 'pvideo'}
+                        className="rounded bg-neutral-800 border-neutral-700 text-amber-500 w-4 h-4 disabled:opacity-30" />
+                    </label>
+                  </>
+                )}
+              </div>
             </>)}
 
             {/* Style Moods Configuration */}

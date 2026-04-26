@@ -363,6 +363,40 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
         console.error(`Scene ${event.index} video error:`, event.error)
         break
 
+      case 'scene_audio_ready': {
+        const audioSeqNum = (event as any).sequence_number ?? state.sequenceNumber
+        if (audioSeqNum === state.sequenceNumber || audioSeqNum === state.sequenceNumber - 1) {
+          const currentHasScene = state.images.some((img) => img.index === event.index && img.status === 'ready')
+          if (currentHasScene) {
+            set({
+              images: state.images.map((img) =>
+                img.index === event.index
+                  ? { ...img, sceneAudioUrl: event.url, sceneAudioData: event.audio_data || undefined }
+                  : img
+              ),
+            })
+            break
+          }
+        }
+        const completedAudio = [...state.completedSequences]
+        for (const seq of completedAudio) {
+          if (seq.sequenceNumber === audioSeqNum) {
+            seq.images = seq.images.map((img) =>
+              img.index === event.index
+                ? { ...img, sceneAudioUrl: event.url, sceneAudioData: event.audio_data || undefined }
+                : img
+            )
+            set({ completedSequences: completedAudio })
+            break
+          }
+        }
+        break
+      }
+
+      case 'scene_audio_error':
+        console.error(`Scene ${event.index} audio error:`, event.error)
+        break
+
       case 'debug_context':
         set({
           debugContext: {
@@ -460,12 +494,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     sequenceNumber: state.sequenceNumber,
     narrationSegments: state.narrationSegments,
     // Strip large data URLs (base64 videos/images) to stay within localStorage quota
-    images: state.images.map(({ sceneVideoUrl, ...img }) => img),
+    images: state.images.map(({ sceneVideoUrl, sceneAudioData, ...img }) => img),
     choices: state.choices,
     currentScene: state.currentScene,
     completedSequences: state.completedSequences.map(({ videoUrl, ...seq }) => ({
       ...seq,
-      images: seq.images.map(({ sceneVideoUrl, ...img }) => img),
+      images: seq.images.map(({ sceneVideoUrl, sceneAudioData, ...img }) => img),
     })),
     sceneChats: Object.fromEntries(
       Object.entries(state.sceneChats).map(([k, v]) => [k, { ...v, adaptedImageUrl: undefined }])

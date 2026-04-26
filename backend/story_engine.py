@@ -886,6 +886,15 @@ class StoryEngine:
                     print(f"[pvideo] Timeout waiting for videos — closing SSE anyway")
                 print(f"[pvideo] All videos done.")
 
+            if StoryEngine._tts_pending > 0:
+                print(f"[tts] Waiting for {StoryEngine._tts_pending} remaining audio clips...")
+                try:
+                    if StoryEngine._tts_done_event:
+                        await asyncio.wait_for(StoryEngine._tts_done_event.wait(), timeout=120)
+                except asyncio.TimeoutError:
+                    print(f"[tts] Timeout waiting for audio — closing SSE anyway")
+                print(f"[tts] All audio done.")
+
             log.finish()
             await queue.put(None)  # Signal done
 
@@ -1169,8 +1178,10 @@ class StoryEngine:
             },
         }
 
-    async def _generate_video(self, prompt: str, input_image_url: str, video_settings: dict | None = None) -> dict:
-        """Generate a video clip from an image using P-Video (or simulate)."""
+    async def _generate_video(self, prompt: str, input_image_url: str, video_settings: dict | None = None, audio_url: str | None = None) -> dict:
+        """Generate a video clip from an image using P-Video (or simulate).
+        If audio_url is provided, it's passed as inputs.audio so the output uses that
+        soundtrack (and duration is derived from the audio)."""
         vs = video_settings or {}
 
         # Simulation mode: wait ~60s, return the input image as "video"
@@ -1194,18 +1205,23 @@ class StoryEngine:
         if "pvideo_prompt_upsampling" in vs and vs["pvideo_prompt_upsampling"] is not None:
             settings_kwargs["promptUpsampling"] = vs["pvideo_prompt_upsampling"]
 
-        request = IVideoInference(
-            model=VIDEO_MODEL,
-            positivePrompt=prompt,
-            duration=vs.get("duration", VIDEO_DURATION),
-            resolution=vs.get("resolution", VIDEO_RESOLUTION),
-            outputFormat="MP4",
-            includeCost=True,
-            inputs=IVideoInputs(
-                frameImages=[IInputFrame(image=input_image_url, frame="first")]
-            ),
-            settings=ISettings(**settings_kwargs),
-        )
+        inputs_kwargs: dict = {"frameImages": [IInputFrame(image=input_image_url, frame="first")]}
+        video_kwargs: dict = {
+            "model": VIDEO_MODEL,
+            "positivePrompt": prompt,
+            "resolution": vs.get("resolution", VIDEO_RESOLUTION),
+            "outputFormat": "MP4",
+            "includeCost": True,
+            "settings": ISettings(**settings_kwargs),
+        }
+        if audio_url:
+            inputs_kwargs["audio"] = audio_url
+            # Audio mode: duration derived from audio length, must NOT pass duration
+        else:
+            video_kwargs["duration"] = vs.get("duration", VIDEO_DURATION)
+        video_kwargs["inputs"] = IVideoInputs(**inputs_kwargs)
+
+        request = IVideoInference(**video_kwargs)
 
         result = await self.runware.videoInference(requestVideo=request)
         if isinstance(result, IAsyncTaskResponse):
@@ -1347,10 +1363,13 @@ class StoryEngine:
         sse_queue: asyncio.Queue, sequence_number: int = 0,
         draft: bool = True, session_id: str = "",
         prompt_upsampling: bool | None = None,
+        audio_url: str | None = None,
     ):
-        """Fire a P-Video generation concurrently (Runware is serverless — no need to serialize)."""
+        """Fire a P-Video generation concurrently (Runware is serverless — no need to serialize).
+        If audio_url is provided, the output video uses that audio as soundtrack."""
         try:
-            print(f"[pvideo] Scene {scene_index} (seq {sequence_number}): starting {'draft' if draft else 'full'}, upsampling={prompt_upsampling}...")
+            audio_tag = f", audio={'on' if audio_url else 'off'}"
+            print(f"[pvideo] Scene {scene_index} (seq {sequence_number}): starting {'draft' if draft else 'full'}, upsampling={prompt_upsampling}{audio_tag}...")
             print(f"[pvideo] Prompt: {prompt[:150]}...")
             result = await self._generate_video(prompt, image_url, {
                 "draft": draft,
@@ -1358,7 +1377,7 @@ class StoryEngine:
                 "duration": 5,
                 "resolution": "720p",
                 "pvideo_prompt_upsampling": prompt_upsampling,
-            })
+            }, audio_url=audio_url)
             video_url = result.get("url", "")
             video_cost = result.get("cost", 0) or 0
             print(f"[pvideo] Scene {scene_index} (seq {sequence_number}): done in {result['elapsed']}s (${video_cost:.3f})")
@@ -1400,8 +1419,10 @@ class StoryEngine:
         sse_queue: asyncio.Queue, sequence_number: int = 0,
         draft: bool = True, session_id: str = "",
         prompt_upsampling: bool | None = None,
+        audio_url: str | None = None,
     ):
-        """Launch a P-Video task concurrently (no queue — all scenes in parallel)."""
+        """Launch a P-Video task concurrently (no queue — all scenes in parallel).
+        If audio_url is provided, that audio is used as the video's soundtrack."""
         if not StoryEngine._pvideo_done_event:
             StoryEngine._pvideo_done_event = asyncio.Event()
         StoryEngine._pvideo_pending += 1
@@ -1409,9 +1430,95 @@ class StoryEngine:
         task = asyncio.create_task(self._fire_pvideo_task(
             scene_index, image_url, prompt, sse_queue,
             sequence_number=sequence_number, draft=draft, session_id=session_id,
-            prompt_upsampling=prompt_upsampling,
+            prompt_upsampling=prompt_upsampling, audio_url=audio_url,
         ))
         StoryEngine._pvideo_tasks.append(task)
+
+    # ─── Per-scene TTS (xAI via Runware) ─────────────────────────────────────
+    _tts_pending: int = 0
+    _tts_done_event: asyncio.Event | None = None
+    _tts_tasks: list[asyncio.Task] = []
+
+    async def _fire_tts_task(
+        self, scene_index: int, narration_text: str,
+        sse_queue: asyncio.Queue, sequence_number: int,
+        voice: str, language: str, enhance: bool,
+        session_id: str,
+    ) -> str:
+        """Generate TTS for a scene's narration, emit scene_audio_ready, return audio URL."""
+        from tts import enhance_speech_text, generate_speech
+        audio_url = ""
+        try:
+            text = (narration_text or "").strip()
+            if not text:
+                return ""
+            spoken = text
+            enhance_elapsed = 0.0
+            if enhance:
+                try:
+                    spoken, enhance_elapsed = await enhance_speech_text(
+                        self.grok, text, voice=voice, language=language,
+                        grok_model=GROK_MODEL,
+                    )
+                except Exception as e:
+                    print(f"[tts] Scene {scene_index}: enhance failed — {e}, falling back to raw text")
+                    spoken = text
+            print(f"[tts] Scene {scene_index} (seq {sequence_number}): generating {voice}/{language} ({len(spoken)}c, enhance={enhance_elapsed}s)...")
+            res = await generate_speech(self.runware, spoken, voice=voice, language=language)
+            audio_url = res.get("audio_url", "") or ""
+            print(f"[tts] Scene {scene_index}: done in {res.get('elapsed')}s (${res.get('cost', 0):.4f})")
+            await sse_queue.put({
+                "type": "scene_audio_ready",
+                "index": scene_index,
+                "sequence_number": sequence_number,
+                "url": audio_url,
+                "audio_data": res.get("audio_data"),
+                "voice": voice,
+                "language": language,
+                "char_count": res.get("char_count", 0),
+                "cost": res.get("cost", 0),
+                "generation_time": res.get("elapsed", 0),
+                "enhanced_text": spoken if enhance else None,
+            })
+            if session_id and audio_url:
+                import db as _db
+                if hasattr(_db, "save_scene_audio"):
+                    _db.fire_and_forget(_db.save_scene_audio(
+                        session_id, sequence_number, scene_index, audio_url
+                    ))
+        except Exception as e:
+            print(f"[tts] Scene {scene_index}: error — {e}")
+            await sse_queue.put({
+                "type": "scene_audio_error",
+                "index": scene_index,
+                "error": str(e),
+            })
+        finally:
+            StoryEngine._tts_pending -= 1
+            if StoryEngine._tts_pending <= 0:
+                StoryEngine._tts_pending = 0
+                if StoryEngine._tts_done_event:
+                    StoryEngine._tts_done_event.set()
+        return audio_url
+
+    def _launch_tts(
+        self, scene_index: int, narration_text: str,
+        sse_queue: asyncio.Queue, sequence_number: int,
+        voice: str = "ara", language: str = "fr", enhance: bool = True,
+        session_id: str = "",
+    ) -> asyncio.Task:
+        """Launch a TTS task for the given scene's narration. Returns the task so the
+        caller can await the audio URL (e.g. for voice-to-video chaining)."""
+        if not StoryEngine._tts_done_event:
+            StoryEngine._tts_done_event = asyncio.Event()
+        StoryEngine._tts_pending += 1
+        StoryEngine._tts_done_event.clear()
+        task = asyncio.create_task(self._fire_tts_task(
+            scene_index, narration_text, sse_queue, sequence_number,
+            voice, language, enhance, session_id,
+        ))
+        StoryEngine._tts_tasks.append(task)
+        return task
 
     async def _flush_completed_images(
         self, tasks: dict, completed: dict, queue: asyncio.Queue,
@@ -1460,23 +1567,60 @@ class StoryEngine:
             if idx < video_start_scene:
                 video_backend = "none"
             print(f"[video] Scene {idx}: video_backend={video_backend}, has_url={bool(result.get('url'))}, start_scene={video_start_scene}")
+
+            # ── TTS narration (independent of video) ──
+            voice_narration = session.video_settings.get("voice_narration", False) if session else False
+            voice_to_video = session.video_settings.get("voice_to_video", False) if session else False
+            voice_id = session.video_settings.get("voice_id", "ara") if session else "ara"
+            voice_lang = session.video_settings.get("voice_language", "fr") if session else "fr"
+            voice_enhance = session.video_settings.get("voice_enhance", True) if session else True
+            _seq_num = session.sequence_number if session else 0
+            _session_id = session.id if session else ""
+            narration_text_for_tts = narration_segments[idx] if (narration_segments and idx < len(narration_segments)) else ""
+
+            tts_task: asyncio.Task | None = None
+            if voice_narration and narration_text_for_tts.strip():
+                tts_task = self._launch_tts(
+                    idx, narration_text_for_tts, queue,
+                    sequence_number=_seq_num,
+                    voice=voice_id, language=voice_lang, enhance=voice_enhance,
+                    session_id=_session_id,
+                )
+
             if result.get("url") and narration_segments and video_backend != "none":
-                _seq_num = session.sequence_number if session else 0
-
-                _session_id = session.id if session else ""
-
                 if video_backend == "pvideo":
                     # P-Video (Runware) — fire concurrently (serverless, no queue)
                     _draft = session.video_settings.get("draft", True) if session else True
                     _upsampling = session.video_settings.get("pvideo_prompt_upsampling") if session else None
                     narration_text = narration_segments[idx] if idx < len(narration_segments) else ""
                     prompt = narration_text.strip() or "a person looking at the camera"
-                    self._launch_pvideo(
-                        idx, result["url"], prompt, queue,
-                        sequence_number=_seq_num, draft=_draft,
-                        session_id=_session_id,
-                        prompt_upsampling=_upsampling,
-                    )
+
+                    if voice_to_video and tts_task is not None:
+                        # Voice-to-video: video must wait for TTS audio URL, then use it as soundtrack
+                        async def _fire_video_after_tts(
+                            _t=tts_task, _idx=idx, _url=result["url"], _prompt=prompt,
+                            _q=queue, _seq=_seq_num, _draft=_draft, _sid=_session_id,
+                            _ups=_upsampling,
+                        ):
+                            try:
+                                audio_url = await _t
+                            except Exception as e:
+                                print(f"[video] Scene {_idx}: TTS failed ({e}), firing video without audio")
+                                audio_url = None
+                            self._launch_pvideo(
+                                _idx, _url, _prompt, _q,
+                                sequence_number=_seq, draft=_draft,
+                                session_id=_sid, prompt_upsampling=_ups,
+                                audio_url=audio_url or None,
+                            )
+                        asyncio.create_task(_fire_video_after_tts())
+                    else:
+                        self._launch_pvideo(
+                            idx, result["url"], prompt, queue,
+                            sequence_number=_seq_num, draft=_draft,
+                            session_id=_session_id,
+                            prompt_upsampling=_upsampling,
+                        )
 
                 elif video_backend == "davinci":
                     # Davinci (MagiHuman) — Grok vision prompt generation

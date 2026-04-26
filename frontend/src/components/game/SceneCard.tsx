@@ -172,7 +172,28 @@ export default function SceneCard({
     }
   }, [image.status, image.url, image.sceneVideoUrl, image.sceneVideoSimulated])
   const sceneVideoRef = useRef<HTMLVideoElement>(null)
+  const sceneAudioRef = useRef<HTMLAudioElement>(null)
   const soundPlayCount = useRef(0) // how many loops have played with sound
+
+  // ── Standalone TTS narration audio ──
+  // Skip standalone playback once a video arrives — the video already carries the audio
+  // (either the TTS via voice_to_video or P-Video's auto-generated soundtrack).
+  const sceneAudioSrc = image.sceneAudioData || image.sceneAudioUrl
+  const playStandaloneAudio = !!sceneAudioSrc && !image.sceneVideoUrl
+  useEffect(() => {
+    const a = sceneAudioRef.current
+    if (!a || !playStandaloneAudio) return
+    if (isViewing && audioReady) {
+      a.muted = false
+      a.currentTime = 0
+      a.play().catch(() => {
+        a.muted = true
+        a.play().catch(() => {})
+      })
+    } else {
+      a.pause()
+    }
+  }, [isViewing, audioReady, playStandaloneAudio])
 
   // Subscribe to global audio unlock
   useEffect(() => {
@@ -539,6 +560,23 @@ export default function SceneCard({
               <div className="w-2 h-2 rounded-full bg-cyan-400/70 animate-pulse" />
               <span className="text-[10px] text-white/50 font-mono">{videoWaitSeconds}s</span>
             </div>
+          )}
+          {/* TTS narration audio (hidden player — only plays when no video yet) */}
+          {playStandaloneAudio && (
+            <>
+              <audio
+                ref={sceneAudioRef}
+                src={sceneAudioSrc}
+                preload="auto"
+                className="hidden"
+              />
+              {isViewing && (
+                <div className="absolute top-3 right-3 z-[5] bg-amber-600/70 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 pointer-events-none">
+                  <div className="w-2 h-2 rounded-full bg-amber-200 animate-pulse" />
+                  <span className="text-[10px] text-white/90 font-mono">VOICE</span>
+                </div>
+              )}
+            </>
           )}
           {/* Adapted image (from chat) — overlays when viewing chat pages */}
           {adaptedImageUrl && (

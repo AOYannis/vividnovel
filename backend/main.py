@@ -100,6 +100,11 @@ class StartGameRequest(BaseModel):
     video_start_scene: int = 0  # 0=all scenes get video, 4=only scenes 4-7 get video
     pvideo_prompt_upsampling: Optional[bool] = None  # None=runware default, True=force on, False=force off
     custom_character_desc: Optional[str] = None  # description for the "custom" actor
+    voice_narration: bool = False        # Generate per-scene TTS audio
+    voice_to_video: bool = False         # Use TTS audio as soundtrack of P-Video
+    voice_id: str = "ara"                # ara | eve | leo | rex | sal
+    voice_language: str = "fr"           # auto | en | fr | es-ES | ...
+    voice_enhance: bool = True           # Pre-enhance narration with Grok before TTS
 
 
 class PreviewPromptRequest(BaseModel):
@@ -251,6 +256,12 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
         session.video_settings["video_start_scene"] = req.video_start_scene
     if req.pvideo_prompt_upsampling is not None:
         session.video_settings["pvideo_prompt_upsampling"] = req.pvideo_prompt_upsampling
+    # Voice / TTS settings
+    session.video_settings["voice_narration"] = req.voice_narration
+    session.video_settings["voice_to_video"] = req.voice_to_video
+    session.video_settings["voice_id"] = req.voice_id
+    session.video_settings["voice_language"] = req.voice_language
+    session.video_settings["voice_enhance"] = req.voice_enhance
     # Patch custom character description into ACTOR_REGISTRY for this session
     if req.custom_character_desc:
         session._custom_actor_override = {
@@ -1972,90 +1983,19 @@ class TTSEnhanceRequest(BaseModel):
     brief: str = ""                 # optional emotion/scene brief
 
 
-_TTS_TAG_GUIDE = """xAI TTS reads the input LITERALLY — anything that isn't a recognized tag is spoken aloud,
-including parentheses, asterisks, ALL CAPS, ellipses, hyphens, and stage directions.
-The ONLY way to add expression is via the tags below.
-
-INLINE TAGS — place at the exact moment the sound occurs (no wrapping):
-  [pause]            short silence
-  [long-pause]       longer silence
-  [breath]           audible breath
-  [inhale]           sharp/deep inhale
-  [exhale]           audible exhale (great for tension release)
-  [sigh]             a sigh
-  [laugh]            short laugh
-  [chuckle]          quiet amused laugh
-  [giggle]           light playful laugh
-  [cry]              sob / cry
-  [tsk]              tongue-against-teeth disapproval
-  [tongue-click]     tongue click
-  [lip-smack]        lip smack
-  [hum-tune]         brief hummed melody
-
-WRAPPING TAGS — wrap the affected text:
-  <soft>...</soft>                          hushed, gentle
-  <whisper>...</whisper>                    quiet, intimate
-  <loud>...</loud>                          raised volume
-  <slow>...</slow>                          slower delivery
-  <fast>...</fast>                          rapid delivery
-  <higher-pitch>...</higher-pitch>          lifted pitch
-  <lower-pitch>...</lower-pitch>            dropped pitch
-  <build-intensity>...</build-intensity>    crescendo across the wrapped span
-  <decrease-intensity>...</decrease-intensity>   diminuendo across the wrapped span
-  <emphasis>...</emphasis>                  stress the wrapped word(s)
-  <sing-song>...</sing-song>                playful sing-song melody
-  <singing>...</singing>                    actually sung
-  <laugh-speak>...</laugh-speak>            speech mixed with laughter
-
-ABSOLUTE RULES — violate any of these and the output is broken:
-1. Do NOT use parentheses (softly), asterisks *sighs*, brackets [softly], em-dashes for direction,
-   or ANY stage-direction notation outside the tag list above. These will be SPOKEN LITERALLY.
-2. Do NOT add narration, character names, "she said", or any words the speaker would not say.
-3. Do NOT translate. Keep the source language exactly.
-4. Layer tags to be expressive: combine wrapping (e.g. <whisper>) with inline (e.g. [breath], [exhale])
-   to create real emotion — a flat sentence with one tag is a wasted opportunity. Aim for 3-7 tags
-   in a typical 1-3 sentence prompt.
-5. Match the tags to the Direction the user gave (intimate → <whisper>+[breath]+<slow>;
-   building tension → <build-intensity>+[inhale]; teasing → <sing-song>+[chuckle]; etc.).
-6. Output ONLY the rewritten spoken text with tags. No preamble, no explanation, no quotes around it.
-"""
-
-
 @app.post("/api/playground/tts/enhance")
 async def playground_tts_enhance(req: TTSEnhanceRequest):
     """Use Grok to rewrite plain text into an expressive xAI-TTS-tagged prompt."""
-    import time as _time
-
-    start = _time.time()
-    sys_msg = (
-        "You are a voice direction assistant. Rewrite the user's text into an "
-        "expressive prompt for xAI Text-to-Speech.\n\n" + _TTS_TAG_GUIDE
-    )
-    user_msg = f"Voice: {req.voice}\nLanguage: {req.language}\n"
-    if req.brief.strip():
-        user_msg += f"Direction: {req.brief.strip()}\n"
-    user_msg += f"\nText:\n{req.text.strip()}"
-
+    from tts import enhance_speech_text
     try:
-        resp = await grok_client.chat.completions.create(
-            model=GROK_MODEL,
-            messages=[
-                {"role": "system", "content": sys_msg},
-                {"role": "user", "content": user_msg},
-            ],
-            temperature=0.7,
-            max_tokens=1200,
+        enhanced, elapsed = await enhance_speech_text(
+            grok_client, req.text,
+            voice=req.voice, language=req.language, brief=req.brief,
+            grok_model=GROK_MODEL,
         )
-        enhanced = resp.choices[0].message.content.strip()
-        # Strip surrounding quotes/code-fences if Grok added any
-        if enhanced.startswith("```") and enhanced.endswith("```"):
-            enhanced = enhanced.strip("`").strip()
-        if (enhanced.startswith('"') and enhanced.endswith('"')) or (enhanced.startswith("'") and enhanced.endswith("'")):
-            enhanced = enhanced[1:-1].strip()
     except Exception as e:
         raise HTTPException(500, f"Grok enhancement failed: {e}")
-
-    return {"enhanced_text": enhanced, "elapsed": round(_time.time() - start, 2)}
+    return {"enhanced_text": enhanced, "elapsed": elapsed}
 
 
 class TTSRequest(BaseModel):
@@ -2068,65 +2008,18 @@ class TTSRequest(BaseModel):
 @app.post("/api/playground/tts")
 async def playground_tts(req: TTSRequest):
     """Generate speech audio via Runware xAI TTS. Returns hosted URL + base64."""
-    import time as _time
-    import uuid as _uuid
-    from runware import IAudioInference, IAudioSpeech
-
+    from tts import generate_speech
     if runware_client is None:
         raise HTTPException(503, "Runware client not connected")
     if not req.text.strip():
         raise HTTPException(400, "text is required")
-
-    start = _time.time()
     try:
-        request = IAudioInference(
-            taskUUID=str(_uuid.uuid4()),
-            model="xai:tts@0",
-            speech=IAudioSpeech(
-                text=req.text,
-                voice=req.voice,
-                language=req.language,
-            ),
-            outputType="URL",
-            outputFormat=req.output_format,
-            includeCost=True,
-            deliveryMethod="sync",
+        return await generate_speech(
+            runware_client, req.text,
+            voice=req.voice, language=req.language, output_format=req.output_format,
         )
-        result = await runware_client.audioInference(requestAudio=request)
     except Exception as e:
         raise HTTPException(500, f"TTS generation failed: {e}")
-
-    if isinstance(result, list):
-        audio = result[0] if result else None
-    else:
-        audio = result
-    if audio is None:
-        raise HTTPException(500, "TTS returned no audio")
-
-    audio_url = getattr(audio, "audioURL", None) or ""
-    audio_b64 = getattr(audio, "audioBase64Data", None) or ""
-    cost = float(getattr(audio, "cost", 0) or 0)
-
-    # If Runware didn't return base64, fetch the URL once so the UI can play it instantly
-    if not audio_b64 and audio_url:
-        import aiohttp, base64 as _b64
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(audio_url) as r:
-                    audio_b64 = _b64.b64encode(await r.read()).decode()
-        except Exception:
-            pass
-
-    mime = {"MP3": "audio/mpeg", "WAV": "audio/wav", "FLAC": "audio/flac", "OGG": "audio/ogg"}.get(req.output_format, "audio/mpeg")
-    return {
-        "audio_url": audio_url,
-        "audio_data": f"data:{mime};base64,{audio_b64}" if audio_b64 else None,
-        "voice": req.voice,
-        "language": req.language,
-        "char_count": len(req.text),
-        "cost": cost,
-        "elapsed": round(_time.time() - start, 2),
-    }
 
 
 class AudioVideoRequest(BaseModel):
