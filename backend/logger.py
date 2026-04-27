@@ -107,6 +107,28 @@ class SequenceLogger:
             "secondary_characters": secondary_chars,
         })
 
+    def log_image_prompt_crafted(self, index: int, scene_summary: str,
+                                  shot_intent: str, mood: str,
+                                  actors: list[str], final_prompt: str,
+                                  elapsed: float):
+        """Audit how the image-prompt specialist (Phase 3A) transformed the
+        narrator's lean scene spec into the final Z-Image prompt."""
+        self._print(
+            f"  PROMPT-CRAFT {index}: mood={mood} actors={actors} "
+            f"summary={scene_summary[:60]!r} intent={shot_intent[:40]!r} "
+            f"final={len(final_prompt)} chars in {elapsed}s"
+        )
+        self._add("image_prompt_crafted", {
+            "index": index,
+            "scene_summary": scene_summary,
+            "shot_intent": shot_intent,
+            "mood": mood,
+            "actors_present": actors,
+            "final_prompt": final_prompt,
+            "final_prompt_length": len(final_prompt),
+            "elapsed": elapsed,
+        })
+
     def log_image_result(self, index: int, loras_applied: list[dict],
                          final_prompt: str, width: int, height: int,
                          steps: int, cfg: float, seed: int | None,

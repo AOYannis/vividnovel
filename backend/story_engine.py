@@ -18,7 +18,7 @@ from config import (
     GROK_MODEL, GROK_PRICING, GROK_BASE_URL, XAI_API_KEY,
     IMAGE_MODEL, IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_STEPS, IMAGE_CFG, IMAGE_FORMAT,
     DEFAULT_STYLE_LORAS, DEFAULT_STYLE_MOODS, MAX_LORAS_PER_IMAGE,
-    ACTOR_REGISTRY, IMAGES_PER_SEQUENCE,
+    ACTOR_REGISTRY, IMAGES_PER_SEQUENCE, SETTINGS,
     VIDEO_MODEL, VIDEO_DURATION, VIDEO_RESOLUTION, VIDEO_DRAFT, VIDEO_AUDIO, VIDEO_SIMULATE, VIDEO_EARLY_START,
     MYSTIC_XXX_ZIT_V5_LORA_ID, SPECIALIST_STYLE_LORA_IDS, ZIT_NSFW_LORA_V2_ID,
 )
@@ -30,6 +30,9 @@ from memory import (
 )
 from logger import SequenceLogger
 from davinci import DAVINCI_ENABLED, DAVINCI_TIMEOUT, generate_scene_video as davinci_generate, build_davinci_prompt
+from scene_agent import craft_image_prompt
+from mood_gate import gate_mood
+from presence_gate import gate_presence
 
 
 import re as _re
@@ -44,8 +47,14 @@ _META_PATTERNS = [
     _re.compile(r'image_index\s*=\s*\d+', _re.IGNORECASE),
 ]
 
-def _clean_narration(text: str) -> str:
-    """Remove agent meta-text that leaks into narration."""
+def _clean_narration(text: str, codename_to_name: dict[str, str] | None = None) -> str:
+    """Remove agent meta-text that leaks into narration.
+
+    `codename_to_name`: optional map of cast codenames → resolved story names.
+    Any verbatim codename found in the narration is replaced by the story name
+    (or stripped if no name is known yet). Catches the introduction-turn slip
+    where Grok writes 'white_short' instead of 'Elara'.
+    """
     cleaned = text.strip()
     # Remove function call references
     for pat in _META_PATTERNS[:3]:
@@ -54,7 +63,16 @@ def _clean_narration(text: str) -> str:
     for pat in _META_PATTERNS[3:]:
         if pat.match(cleaned):
             return ''
-    # Clean up whitespace artifacts
+    # Scrub verbatim cast codenames the narrator may have leaked
+    if codename_to_name:
+        for code, name in codename_to_name.items():
+            if not code:
+                continue
+            pattern = _re.compile(rf'\b{_re.escape(code)}\b', _re.IGNORECASE)
+            cleaned = pattern.sub(name or '', cleaned)
+    # Clean up whitespace artifacts (and stray punctuation left by stripped codenames)
+    cleaned = _re.sub(r'\s+([,;:.!?])', r'\1', cleaned)
+    cleaned = _re.sub(r'([—–-])\s*\1+', r'\1', cleaned)
     cleaned = _re.sub(r'\n{3,}', '\n\n', cleaned)
     cleaned = _re.sub(r'  +', ' ', cleaned)
     return cleaned.strip()
@@ -547,7 +565,24 @@ class StoryEngine:
 
                     # Accumulate narration for Davinci prompts (after cleaning)
                     if content_acc:
-                        cleaned = _clean_narration(content_acc)
+                        # Build codename → story-name map for the scrubber. Catches
+                        # introduction-turn leaks ('white_short' before Elara is locked).
+                        # Sources: already-locked names in consistency, plus character_names
+                        # from tool calls in THIS round (not yet committed to consistency).
+                        cast_codes = [c for c in (session.cast.get("actors") or []) if c]
+                        code_to_name = {code: "" for code in cast_codes}
+                        for display_name, code in (session.consistency.character_actors or {}).items():
+                            if code:
+                                code_to_name[code] = display_name
+                        for _tc in assistant_tool_calls:
+                            try:
+                                _args = json.loads(_tc["function"]["arguments"])
+                            except (json.JSONDecodeError, KeyError):
+                                continue
+                            for code, display_name in (_args.get("character_names") or {}).items():
+                                if code and display_name and not code_to_name.get(code):
+                                    code_to_name[code] = display_name
+                        cleaned = _clean_narration(content_acc, code_to_name)
                         if cleaned:
                             narration_segments_acc.append(cleaned)
 
@@ -572,18 +607,113 @@ class StoryEngine:
                             image_index = args.get("image_index", images_generated)
                             images_generated += 1
 
+                            # ── Phase 3A: image-prompt specialist ──────────────
+                            # Narrator sends a lean spec (scene_summary + shot_intent
+                            # + single mood name). The specialist composes the actual
+                            # Z-Image prompt + we normalise mood → style_moods list
+                            # so the rest of the pipeline (relationship scoring, LoRA
+                            # stacking, TTS, consistency tracker) keeps working.
+                            scene_summary = (args.get("scene_summary") or "").strip()
+                            shot_intent = (args.get("shot_intent") or "").strip()
+                            requested_mood = (args.get("mood") or "neutral").strip() or "neutral"
+                            requested_actors = args.get("actors_present", []) or []
+
+                            # Phase 3D follow-up: server-side presence gate (slice mode).
+                            # Strips cast members the resolver did NOT place at the current
+                            # location/slot. Pool actors and unknown codenames pass through.
+                            slice_enforce = session.world is not None
+                            actors_present, gate_removed = gate_presence(
+                                requested_actors,
+                                cast_codes=session.cast.get("actors", []) or [],
+                                allowed_cast=present_characters if slice_enforce else None,
+                                enforce=slice_enforce,
+                            )
+                            if gate_removed:
+                                print(f"[presence_gate] scene {image_index}: stripped {gate_removed} "
+                                      f"(allowed={present_characters})")
+                                # Also strip them from character_names so the lock isn't created
+                                _names = args.get("character_names") or {}
+                                for _code in gate_removed:
+                                    _names.pop(_code, None)
+                                args["character_names"] = _names
+                                args["actors_present"] = actors_present
+
+                            # Phase 3C: server-side mood gate (relationship-level rule).
+                            mood_name, mood_downgraded = gate_mood(
+                                requested_mood, actors_present, session.relationships
+                            )
+                            if mood_downgraded:
+                                print(f"[mood_gate] scene {image_index}: {requested_mood!r} → {mood_name!r} "
+                                      f"(actors={actors_present}, relationships gated)")
+
+                            actor_genders_map = (session.cast or {}).get("actor_genders", {}) or {}
+                            actor_lookup: dict[str, dict] = {}
+                            for code in actors_present:
+                                base = ACTOR_REGISTRY.get(code) or {}
+                                if code == "custom" and getattr(self, "_custom_override", None):
+                                    base = {**base, **self._custom_override}
+                                actor_lookup[code] = {
+                                    "trigger_word": base.get("trigger_word"),
+                                    "prompt_prefix": base.get("prompt_prefix"),
+                                    "description": base.get("description"),
+                                    "gender": actor_genders_map.get(code, "female"),
+                                }
+
+                            mood_data = (session.style_moods or DEFAULT_STYLE_MOODS).get(mood_name)
+
+                            location_hint = args.get("location_description") or ""
+                            if not location_hint and session.world is not None:
+                                _loc = session.world.location_by_id(session.world.current_location)
+                                if _loc:
+                                    location_hint = f"{_loc.name} ({_loc.type}) — {_loc.description}"
+
+                            setting_label = (
+                                SETTINGS.get(session.setting, {}).get("label")
+                                or session.custom_setting_text[:80]
+                                or session.setting
+                                or ""
+                            )
+
+                            crafted_prompt, craft_elapsed = await craft_image_prompt(
+                                self.grok,
+                                scene_index=image_index,
+                                scene_summary=scene_summary,
+                                shot_intent=shot_intent,
+                                actors_present=actors_present,
+                                mood_name=mood_name,
+                                actor_lookup=actor_lookup,
+                                mood_data=mood_data,
+                                setting_label=setting_label,
+                                custom_setting_text=session.custom_setting_text or "",
+                                location_hint=location_hint,
+                                language=session.language or "fr",
+                                player_gender=(session.player or {}).get("gender", "male"),
+                                grok_model=session.grok_model,
+                            )
+
+                            # Inject specialist output back into args so downstream
+                            # code (consistency tracker, _generate_image, frontend
+                            # event payload) sees the materialised prompt.
+                            args["image_prompt"] = crafted_prompt
+                            args["style_moods"] = ["neutral"] if mood_name == "neutral" else [mood_name]
+
+                            log.log_image_prompt_crafted(
+                                image_index, scene_summary, shot_intent, mood_name,
+                                actors_present, crafted_prompt, craft_elapsed,
+                            )
+
                             # Log the image request
                             log.log_image_request(
                                 image_index,
-                                args.get("image_prompt", ""),
-                                args.get("actors_present", []),
-                                args.get("style_moods", args.get("style_mood", ["neutral"])),
+                                crafted_prompt,
+                                actors_present,
+                                args["style_moods"],
                                 args.get("secondary_characters", {}),
                             )
 
                             # Update relationship progress for actors in the scene
-                            rel_actors = args.get("actors_present", [])
-                            scene_moods = args.get("style_moods", ["neutral"])
+                            rel_actors = actors_present
+                            scene_moods = args["style_moods"]
                             for actor_code in rel_actors:
                                 if actor_code not in session.relationships:
                                     session.relationships[actor_code] = {
@@ -885,9 +1015,14 @@ class StoryEngine:
             if MEM0_ENABLED:
                 try:
                     all_narration = ""
+                    cast_codes_post = [c for c in (session.cast.get("actors") or []) if c]
+                    code_to_name_post = {code: "" for code in cast_codes_post}
+                    for display_name, code in (session.consistency.character_actors or {}).items():
+                        if code:
+                            code_to_name_post[code] = display_name
                     for msg in messages:
                         if msg.get("role") == "assistant" and msg.get("content"):
-                            cleaned = _clean_narration(msg["content"])
+                            cleaned = _clean_narration(msg["content"], code_to_name_post)
                             if cleaned:
                                 all_narration += cleaned + "\n"
 
@@ -953,9 +1088,14 @@ class StoryEngine:
 
             # Extract narration segments from assistant messages (one per scene)
             narration_segments = []
+            cast_codes_extract = [c for c in (session.cast.get("actors") or []) if c]
+            code_to_name_extract = {code: "" for code in cast_codes_extract}
+            for display_name, code in (session.consistency.character_actors or {}).items():
+                if code:
+                    code_to_name_extract[code] = display_name
             for msg in messages:
                 if msg.get("role") == "assistant" and msg.get("content"):
-                    cleaned = _clean_narration(msg["content"])
+                    cleaned = _clean_narration(msg["content"], code_to_name_extract)
                     if cleaned:
                         narration_segments.append(cleaned)
             # Pad to exactly 5 segments

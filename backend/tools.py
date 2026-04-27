@@ -2,24 +2,23 @@
 
 from config import IMAGES_PER_SEQUENCE
 
+# ─── Phase 3A — lean narrator schema ─────────────────────────────────────────
+# The narrator no longer writes the image prompt itself. It emits a SHORT scene
+# spec (summary + camera intent + mood name + visible actors). A specialist
+# agent (`scene_agent.craft_image_prompt`) turns that spec into the actual
+# Z-Image Turbo prompt at runtime. This keeps the narrator's system prompt
+# small and focused on storytelling — image rules live in scene_agent.py.
 SCENE_IMAGE_TOOL = {
     "type": "function",
     "function": {
         "name": "generate_scene_image",
         "description": (
-            "Generate an image for the current scene. Call ONCE per scene, "
-            "AFTER writing 1-2 short sentences of stage direction + character dialogue. "
-            "The image_prompt must be FULLY SELF-CONTAINED: the image model "
-            "has NO memory of previous images. Describe EVERYTHING from scratch "
-            "every time (full character appearance, full setting, full lighting). "
-            "Describe each character ONCE only — never duplicate a character. "
-            "Always specify what each hand is doing. "
-            "Every image MUST be first-person POV from the player (camera = player's eyes): "
-            "frame the NPC(s) as the player sees them; if the male player is in the scene, "
-            "only his hands/forearms/lower body may appear at frame edges — never his full face "
-            "or a third-person wide shot of the couple. "
-            "The model IGNORES negations: never write 'no X' or 'without X' — "
-            "instead describe positively what IS in the scene."
+            "Generate the image for the CURRENT scene. Call ONCE per scene, AFTER writing "
+            "1-2 short sentences of stage direction + character dialogue. "
+            "You DO NOT write the image prompt — a specialist agent composes it from your "
+            "scene_summary + shot_intent + mood + actors_present. Just describe WHAT "
+            "happens; the specialist owns POV, lighting, camera, and skin-realism keywords. "
+            "Always pass actors_present (LoRA loading depends on it)."
         ),
         "parameters": {
             "type": "object",
@@ -29,102 +28,80 @@ SCENE_IMAGE_TOOL = {
                     "description": f"Scene number in this sequence (0-{IMAGES_PER_SEQUENCE - 1})",
                     "enum": list(range(IMAGES_PER_SEQUENCE)),
                 },
-                "image_prompt": {
+                "scene_summary": {
                     "type": "string",
                     "description": (
-                        "SELF-CONTAINED image prompt in English (100-250 words) for Z-Image Turbo. "
-                        "MUST use first-person POV (player's eyes): start with POV markers; "
-                        "never describe a third-person wide shot of two full bodies. "
-                        "The model has ZERO context between images. Structure as a Camera Director: "
-                        "Layer 1 (Subject): POV first-person, [shot type] of a [age, ethnicity, body type, facial features], "
-                        "wearing [specific clothing with materials and state]. Describe each character ONCE. "
-                        "Specify what each hand is doing. "
-                        "Layer 2 (Setting): specific location, decor, environment details. "
-                        "Layer 3 (Lighting): MUST name a specific lighting style "
-                        "(e.g. 'soft diffused daylight', 'warm golden key light from vintage sconces', "
-                        "'neon-lit nightclub ambiance'). Always include a specific lighting style, avoid non natural lighting styles (e.g. 'studio lighting', 'softbox lighting')."
-                        "Layer 4 (Camera): lens type, photography style keyword "
-                        "(e.g. 'Shot on Leica M10, 50mm lens, Portra Film Photo, crisp details, "
-                        "shallow depth of field'). "
-                        "MUST include skin realism keywords: 'highly detailed skin texture', "
-                        "'subtle skin pores', 'natural skin tones'. "
-                        "NEVER use negation words or these words: 'selfie', 'phone', 'camera', "
-                        "'mirror', 'blur', 'artifact', 'you', 'your', 'viewer'."
+                        "1-2 sentences describing what is HAPPENING in this 10-second beat: "
+                        "who is doing what, body language, key emotion. Plain prose, in the "
+                        "narration language. NO camera direction, NO lighting words — just "
+                        "the action. Example: \"She leans across the bar, voice low, fingers "
+                        "tracing the rim of her glass while she watches you.\""
+                    ),
+                },
+                "shot_intent": {
+                    "type": "string",
+                    "description": (
+                        "1 short line of camera/tone hint for the image specialist. "
+                        "Examples: 'intimate close-up, warmth', 'wide atmospheric establishing shot, "
+                        "rainy street', 'over-the-shoulder, tense', 'extreme macro of two hands'. "
+                        "Optional but strongly recommended — it steers the shot type."
+                    ),
+                },
+                "mood": {
+                    "type": "string",
+                    "description": (
+                        "ONE canonical mood name. Use 'neutral' for normal scenes (conversations, "
+                        "atmosphere, daily life). Use a specific mood name for intimate/sexual "
+                        "scenes — pick the SPECIFIC position when one fits "
+                        "(kiss, sensual_tease, blowjob, cunnilingus, missionary, doggystyle, "
+                        "cowgirl, etc.). The available moods and the relationship-level gating "
+                        "are explained in the system prompt."
                     ),
                 },
                 "actors_present": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "CRITICAL: List of actor codenames visible in this image. "
-                        "Use exact codenames from the cast (e.g. 'nataly', 'shorty_asian'). "
-                        "This field controls which character LoRAs are applied — if you "
-                        "omit a character, their LoRA will NOT be loaded and they will "
-                        "look WRONG. Always include ALL cast members visible in the scene. "
-                        "Only use an empty array [] for atmospheric shots with NO person visible."
+                        "CRITICAL: codenames of cast members visible in this image. "
+                        "Use the EXACT codenames from the cast (e.g. 'nataly', 'shorty_asian'). "
+                        "This list controls which character LoRAs are loaded — omitting a "
+                        "character makes their face look WRONG. Empty array [] is correct ONLY "
+                        "for atmospheric shots with no cast member visible."
                     ),
                 },
                 "character_names": {
                     "type": "object",
                     "description": (
-                        "Map actor codenames to their STORY NAMES (the names used in narration). "
+                        "Map cast codenames to the STORY NAMES used in the narration. "
                         "E.g. {'nataly': 'Nathalie', 'shorty_asian': 'Mei'}. "
-                        "Include this on EVERY call so the system tracks which name each character uses."
+                        "Include this on EVERY call so the system locks each name to its actor."
                     ),
                     "additionalProperties": {"type": "string"},
                 },
                 "location_description": {
                     "type": "string",
                     "description": (
-                        "Brief location tag (e.g. 'candlelit 1830s Parisian salon with velvet furniture'). "
-                        "Copy-paste IDENTICALLY from previous scene if location unchanged."
+                        "Brief location tag for cross-scene continuity (e.g. 'candlelit hotel "
+                        "room with velvet curtains'). Copy IDENTICALLY from the previous scene "
+                        "if the location is unchanged."
                     ),
                 },
                 "clothing_state": {
                     "type": "object",
                     "description": (
-                        "Current clothing for each visible actor. Keys = actor codenames. "
-                        "Values = full clothing description. "
-                        "CRITICAL: each character has their OWN clothing — never copy one "
-                        "character's outfit to another. Verify the codename matches the "
-                        "correct character before writing. Copy-paste IDENTICALLY from "
-                        "previous scene unless the narrative changes that specific character's clothing."
-                    ),
-                    "additionalProperties": {"type": "string"},
-                },
-                "style_moods": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "List of active style moods for this image. You can combine multiple moods. "
-                        "Each mood injects a visual directive and may activate a style LoRA. "
-                        "Available moods and their effects are listed in the system prompt. "
-                        "Use ['neutral'] for normal scenes. Examples: ['sensual_tease'] for flirt/partial dress, "
-                        "['explicit_mystic'], ['missionary'], ['doggystyle'], ['blowjob'], ['cunnilingus'], "
-                        "['cunnilingus_from_behind'], ['cowgirl']."
-                    ),
-                },
-                "secondary_characters": {
-                    "type": "object",
-                    "description": (
-                        "Declare secondary characters (not in the main cast) appearing in this scene. "
-                        "Keys = stable codenames you invent (e.g. 'rival_marco', 'barman_jules', 'colleague_anna'). "
-                        "Values = detailed physical description in English: age, ethnicity, build, facial features, "
-                        "hair style/color. Use famous actor/actress resemblances for visual anchoring "
-                        "(e.g. 'resembling a young Oscar Isaac, early 30s, olive skin, dark stubble, strong jaw, "
-                        "intense dark brown eyes, athletic build, 180cm'). "
-                        "Reuse the EXACT same codename and description across all scenes for consistency. "
-                        "The description is prepended to the image prompt automatically."
+                        "Current clothing per visible cast member, keyed by codename. "
+                        "Each character has their OWN clothing — never copy one character's "
+                        "outfit onto another. Copy IDENTICALLY from the previous scene unless "
+                        "the narrative just changed that character's clothing."
                     ),
                     "additionalProperties": {"type": "string"},
                 },
             },
             "required": [
                 "image_index",
-                "image_prompt",
+                "scene_summary",
                 "actors_present",
-                "location_description",
-                "clothing_state",
+                "mood",
             ],
         },
     },
