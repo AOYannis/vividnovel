@@ -228,9 +228,11 @@ async def enhance_speech_text(
     language: str = "fr",
     brief: str = "",
     grok_model: str = "grok-4-1-fast-non-reasoning",
-) -> tuple[str, float]:
+) -> tuple[str, float, dict]:
     """Use Grok to rewrite plain text into an xAI-TTS-tagged expressive prompt.
-    Returns (enhanced_text, elapsed_seconds).
+    Returns (enhanced_text, elapsed_seconds, usage_dict).
+    `usage_dict` is `{"input_tokens": int, "output_tokens": int, "cached_tokens": int}` —
+    used by callers to roll the enhance cost into per-sequence totals.
     Voice/language are NOT included in the user message — they tend to leak back
     into the output and get spoken aloud. They're only used here for logging context."""
     start = time.time()
@@ -264,7 +266,17 @@ async def enhance_speech_text(
     enhanced = _strip_leaked_metadata(enhanced)
     enhanced = _sanitize_tts_tags(enhanced)
     _ = (voice, language)  # acknowledged but intentionally not sent to Grok
-    return enhanced, round(time.time() - start, 2)
+
+    # Capture token usage for cost accounting
+    usage = getattr(resp, "usage", None)
+    usage_dict = {
+        "input_tokens": getattr(usage, "prompt_tokens", 0) if usage else 0,
+        "output_tokens": getattr(usage, "completion_tokens", 0) if usage else 0,
+        "cached_tokens": (
+            getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+        ) if usage else 0,
+    }
+    return enhanced, round(time.time() - start, 2), usage_dict
 
 
 async def generate_speech(

@@ -888,6 +888,23 @@ export default function DebugPanel({ onClose }: DebugPanelProps) {
                       ))}
                     </span>
                   </div>
+                  {(cost.video_cost ?? 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-neutral-500">Video:</span>
+                      <span className="font-mono text-neutral-300">${cost.video_cost?.toFixed(4)}</span>
+                    </div>
+                  )}
+                  {(cost.tts_cost ?? 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-neutral-500">TTS:</span>
+                      <span className="font-mono text-neutral-300">
+                        ${cost.tts_cost?.toFixed(4)}
+                        <span className="text-neutral-600 ml-1">
+                          (audio ${(cost.tts_audio_cost ?? 0).toFixed(4)} + enh ${(cost.tts_enhance_cost ?? 0).toFixed(4)})
+                        </span>
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-neutral-500">Total:</span>
                     <span className="font-mono text-emerald-400">

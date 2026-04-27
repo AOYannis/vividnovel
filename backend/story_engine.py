@@ -358,6 +358,13 @@ class StoryEngine:
             grok_input_tokens = 0
             grok_output_tokens = 0
             grok_cached_tokens = 0  # cumulative across rounds — measures cache hit effectiveness
+            # TTS cost accumulators (mutated by concurrent _fire_tts_task; safe under
+            # asyncio's single-thread model where += is atomic). Engine is per-sequence
+            # so these reset naturally on each call.
+            self._tts_audio_cost_total = 0.0      # Runware/xAI TTS audio bytes
+            self._tts_enhance_input_tokens = 0    # Grok enhance call input tokens (cumulative)
+            self._tts_enhance_output_tokens = 0
+            self._tts_enhance_cached_tokens = 0
 
             # Loop: stream Grok, intercept tool calls, fire images, continue
             early_start = session.video_settings.get("early_start", False)
@@ -770,6 +777,15 @@ class StoryEngine:
                 except Exception as e:
                     await queue.put({"type": "video_error", "error": str(e)})
 
+            # Wait briefly for in-flight TTS tasks so their costs land in this
+            # sequence's totals (typical TTS finishes in 2-5s; cap at 15s so a
+            # stuck task can't hold up the choice screen).
+            if StoryEngine._tts_pending > 0 and StoryEngine._tts_done_event:
+                try:
+                    await asyncio.wait_for(StoryEngine._tts_done_event.wait(), timeout=15)
+                except asyncio.TimeoutError:
+                    print(f"[tts] cost-calc wait timed out; partial TTS cost this sequence")
+
             # Compute costs (after video so we include video_cost)
             elapsed = round(time.time() - sequence_start, 1)
             # Cached input tokens are billed at a fraction of the regular input price.
@@ -786,7 +802,18 @@ class StoryEngine:
             image_total_cost = sum(
                 img.get("cost", 0) for img in completed_images.values()
             )
-            total_cost = grok_cost + image_total_cost + video_cost
+            # TTS cost: audio bytes (xAI/Runware) + the Grok enhance call.
+            # Enhance uses the same Grok model & pricing as the main story (it's
+            # the same client), so apply the same input/cached/output rates.
+            tts_audio_cost = round(self._tts_audio_cost_total, 6)
+            enhance_non_cached = max(0, self._tts_enhance_input_tokens - self._tts_enhance_cached_tokens)
+            tts_enhance_cost = (
+                enhance_non_cached * pricing["input"]
+                + self._tts_enhance_cached_tokens * cached_price
+                + self._tts_enhance_output_tokens * pricing["output"]
+            ) / 1_000_000
+            tts_total_cost = round(tts_audio_cost + tts_enhance_cost, 6)
+            total_cost = grok_cost + image_total_cost + video_cost + tts_total_cost
 
             # Update session costs
             session.total_costs["grok_input_tokens"] += grok_input_tokens
@@ -794,6 +821,8 @@ class StoryEngine:
             session.total_costs["grok_cost"] += grok_cost
             session.total_costs["image_cost"] += image_total_cost
             session.total_costs["video_cost"] += video_cost
+            session.total_costs.setdefault("tts_cost", 0.0)
+            session.total_costs["tts_cost"] += tts_total_cost
             session.total_costs["total"] += total_cost
 
             # Save only narrative messages for next sequence context
@@ -858,12 +887,16 @@ class StoryEngine:
                 "costs": {
                     "grok_input_tokens": grok_input_tokens,
                     "grok_output_tokens": grok_output_tokens,
+                    "grok_cached_tokens": grok_cached_tokens,
                     "grok_cost": round(grok_cost, 6),
                     "image_costs": [
                         completed_images.get(i, {}).get("cost", 0)
                         for i in range(IMAGES_PER_SEQUENCE)
                     ],
                     "video_cost": round(video_cost, 4),
+                    "tts_cost": tts_total_cost,
+                    "tts_audio_cost": tts_audio_cost,
+                    "tts_enhance_cost": round(tts_enhance_cost, 6),
                     "total_sequence_cost": round(total_cost, 4),
                     "total_session_cost": round(session.total_costs["total"], 4),
                     "elapsed_seconds": elapsed,
@@ -886,7 +919,10 @@ class StoryEngine:
             log.log_narration(narration_segments)
             log.log_costs(grok_cost, image_total_cost, video_cost, total_cost,
                           grok_input_tokens, grok_output_tokens, elapsed,
-                          cached_tokens=grok_cached_tokens)
+                          cached_tokens=grok_cached_tokens,
+                          tts_cost=tts_total_cost,
+                          tts_audio_cost=tts_audio_cost,
+                          tts_enhance_cost=round(tts_enhance_cost, 6))
 
             # Persist to database (after video is done)
             import db as _db
@@ -1593,12 +1629,17 @@ class StoryEngine:
                     print(f"[tts] Scene {scene_index}: dialogue_only requested but no quoted lines, using full narration")
             spoken = text
             enhance_elapsed = 0.0
+            enhance_usage = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
             if enhance:
                 try:
-                    spoken, enhance_elapsed = await enhance_speech_text(
+                    spoken, enhance_elapsed, enhance_usage = await enhance_speech_text(
                         self.grok, text, voice=voice, language=language,
                         grok_model=GROK_MODEL,
                     )
+                    # Accumulate enhance Grok usage on the engine for cost roll-up
+                    self._tts_enhance_input_tokens += enhance_usage.get("input_tokens", 0)
+                    self._tts_enhance_output_tokens += enhance_usage.get("output_tokens", 0)
+                    self._tts_enhance_cached_tokens += enhance_usage.get("cached_tokens", 0)
                 except Exception as e:
                     print(f"[tts] Scene {scene_index}: enhance failed — {e}, falling back to raw text")
                     spoken = text
@@ -1618,7 +1659,9 @@ class StoryEngine:
                     channels=2 if stereo else 1,
                 )
             audio_url = res.get("audio_url", "") or ""
-            print(f"[tts] Scene {scene_index}: done in {res.get('elapsed')}s (${res.get('cost', 0):.4f})")
+            tts_audio_cost = float(res.get("cost", 0) or 0)
+            self._tts_audio_cost_total += tts_audio_cost
+            print(f"[tts] Scene {scene_index}: done in {res.get('elapsed')}s (${tts_audio_cost:.4f})")
             if log_ref:
                 log_ref.log_tts_result(
                     scene_index, audio_url, res.get("char_count", 0),

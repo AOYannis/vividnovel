@@ -67,9 +67,13 @@ export interface GrokModel {
 export interface SequenceCosts {
   grok_input_tokens: number
   grok_output_tokens: number
+  grok_cached_tokens?: number
   grok_cost: number
   image_costs: number[]
   video_cost?: number
+  tts_cost?: number          // total of (xAI/Runware audio bytes) + (Grok enhance call)
+  tts_audio_cost?: number    // audio bytes only
+  tts_enhance_cost?: number  // Grok enhance call only
   total_sequence_cost: number
   total_session_cost: number
   elapsed_seconds: number

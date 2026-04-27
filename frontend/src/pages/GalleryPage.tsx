@@ -137,6 +137,7 @@ export default function GalleryPage() {
                   <span>LLM: ${seq.costs.grok_cost?.toFixed(4) || '0'} <span className="text-neutral-700">({seq.costs.grok_input_tokens?.toLocaleString() || 0}+{seq.costs.grok_output_tokens?.toLocaleString() || 0} tok)</span></span>
                   <span>Images: ${(seq.costs.image_costs?.reduce((a: number, b: number) => a + b, 0) || 0).toFixed(4)}</span>
                   {(seq.costs.video_cost ?? 0) > 0 && <span>Video: ${seq.costs.video_cost?.toFixed(4)}</span>}
+                  {(seq.costs.tts_cost ?? 0) > 0 && <span>TTS: ${seq.costs.tts_cost?.toFixed(4)}</span>}
                   <span className="text-neutral-700">{seq.costs.elapsed_seconds ? `${Math.round(seq.costs.elapsed_seconds)}s` : ''}</span>
                 </div>
               )}

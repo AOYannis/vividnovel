@@ -1991,14 +1991,14 @@ async def playground_tts_enhance(req: TTSEnhanceRequest):
     """Use Grok to rewrite plain text into an expressive xAI-TTS-tagged prompt."""
     from tts import enhance_speech_text
     try:
-        enhanced, elapsed = await enhance_speech_text(
+        enhanced, elapsed, usage = await enhance_speech_text(
             grok_client, req.text,
             voice=req.voice, language=req.language, brief=req.brief,
             grok_model=GROK_MODEL,
         )
     except Exception as e:
         raise HTTPException(500, f"Grok enhancement failed: {e}")
-    return {"enhanced_text": enhanced, "elapsed": elapsed}
+    return {"enhanced_text": enhanced, "elapsed": elapsed, "usage": usage}
 
 
 class TTSRequest(BaseModel):

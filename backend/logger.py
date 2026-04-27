@@ -186,11 +186,17 @@ class SequenceLogger:
 
     def log_costs(self, grok_cost: float, image_cost: float, video_cost: float,
                   total: float, input_tokens: int, output_tokens: int, elapsed: float,
-                  cached_tokens: int = 0):
+                  cached_tokens: int = 0,
+                  tts_cost: float = 0.0,
+                  tts_audio_cost: float = 0.0,
+                  tts_enhance_cost: float = 0.0):
         cache_pct = (100 * cached_tokens / input_tokens) if input_tokens else 0
-        self._print(f"COSTS: grok=${grok_cost:.4f} ({input_tokens}in/{cached_tokens}cached={cache_pct:.0f}%/{output_tokens}out) | "
-                     f"images=${image_cost:.4f} | video=${video_cost:.4f} | "
-                     f"TOTAL=${total:.4f} | {elapsed}s")
+        self._print(
+            f"COSTS: grok=${grok_cost:.4f} ({input_tokens}in/{cached_tokens}cached={cache_pct:.0f}%/{output_tokens}out) | "
+            f"images=${image_cost:.4f} | video=${video_cost:.4f} | "
+            f"tts=${tts_cost:.4f} (audio=${tts_audio_cost:.4f} + enhance=${tts_enhance_cost:.4f}) | "
+            f"TOTAL=${total:.4f} | {elapsed}s"
+        )
         self._add("costs", {
             "grok_cost": grok_cost,
             "grok_input_tokens": input_tokens,
@@ -199,6 +205,9 @@ class SequenceLogger:
             "grok_output_tokens": output_tokens,
             "image_cost": image_cost,
             "video_cost": video_cost,
+            "tts_cost": tts_cost,
+            "tts_audio_cost": tts_audio_cost,
+            "tts_enhance_cost": tts_enhance_cost,
             "total": total,
             "elapsed_seconds": elapsed,
         })
