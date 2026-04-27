@@ -180,6 +180,7 @@ export default function PlaygroundPage() {
   const [speechBrief, setSpeechBrief] = useState('intimate, breathy, slow')
   const [speechVoice, setSpeechVoice] = useState('ara')
   const [speechLanguage, setSpeechLanguage] = useState('fr')
+  const [speechStereo, setSpeechStereo] = useState(true)
   const [speechPrompt, setSpeechPrompt] = useState('')
   const [speechAudioData, setSpeechAudioData] = useState<string | null>(null)
   const [speechAudioUrl, setSpeechAudioUrl] = useState('')
@@ -371,6 +372,7 @@ export default function PlaygroundPage() {
         voice: speechVoice,
         language: speechLanguage,
         output_format: 'MP3',
+        channels: speechStereo ? 2 : 1,
       })
       setSpeechAudioData(res.audio_data)
       setSpeechAudioUrl(res.audio_url)
@@ -583,6 +585,18 @@ export default function PlaygroundPage() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Channels (mono/stereo) */}
+              <div className="flex bg-neutral-900 rounded-lg p-0.5">
+                <button onClick={() => setSpeechStereo(false)}
+                  className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${!speechStereo ? 'bg-amber-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>
+                  Mono
+                </button>
+                <button onClick={() => setSpeechStereo(true)}
+                  className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${speechStereo ? 'bg-amber-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>
+                  Stereo
+                </button>
               </div>
 
               {/* Step 1 — Concept */}

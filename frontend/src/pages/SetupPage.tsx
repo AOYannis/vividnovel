@@ -44,8 +44,10 @@ export default function SetupPage() {
   const [voiceNarration, setVoiceNarration] = useState(false)
   const [voiceToVideo, setVoiceToVideo] = useState(false)
   const [voiceId, setVoiceId] = useState('ara')
-  const [voiceLanguage, setVoiceLanguage] = useState('fr')
+  // null means "follow game language"; user can override to a specific BCP-47 code
+  const [voiceLanguage, setVoiceLanguage] = useState<string | null>(null)
   const [voiceEnhance, setVoiceEnhance] = useState(true)
+  const [voiceStereo, setVoiceStereo] = useState(true)
 
   // Grok model selection
   const [grokModels, setGrokModels] = useState<GrokModel[]>([])
@@ -306,8 +308,10 @@ export default function SetupPage() {
         voice_narration: voiceNarration || undefined,
         voice_to_video: voiceToVideo || undefined,
         voice_id: voiceNarration ? voiceId : undefined,
-        voice_language: voiceNarration ? voiceLanguage : undefined,
+        // Send only when user explicitly overrode; otherwise backend falls back to the game language
+        voice_language: voiceNarration && voiceLanguage ? voiceLanguage : undefined,
         voice_enhance: voiceNarration ? voiceEnhance : undefined,
+        voice_stereo: voiceNarration ? voiceStereo : undefined,
       })
       store.startSession(result.session_id)
     } catch (err) {
@@ -1253,8 +1257,11 @@ export default function SetupPage() {
                       </div>
                       <div>
                         <label className="text-[10px] text-neutral-500 uppercase tracking-wider">Language</label>
-                        <select value={voiceLanguage} onChange={(e) => setVoiceLanguage(e.target.value)}
+                        <select
+                          value={voiceLanguage ?? ''}
+                          onChange={(e) => setVoiceLanguage(e.target.value || null)}
                           className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:border-amber-600 focus:outline-none">
+                          <option value="">match game ({selectedLanguage})</option>
                           {['auto', 'fr', 'en', 'es-ES', 'es-MX', 'de', 'it', 'pt-BR', 'pt-PT', 'ja', 'ko', 'zh', 'ru', 'tr', 'vi', 'id', 'hi', 'bn', 'ar-EG', 'ar-SA', 'ar-AE'].map((l) => (
                             <option key={l} value={l}>{l}</option>
                           ))}
@@ -1267,6 +1274,14 @@ export default function SetupPage() {
                         <div className="text-[10px] text-neutral-500">Adds expressive tags before TTS (~+1s/scene)</div>
                       </div>
                       <input type="checkbox" checked={voiceEnhance} onChange={(e) => setVoiceEnhance(e.target.checked)}
+                        className="rounded bg-neutral-800 border-neutral-700 text-amber-500 w-4 h-4" />
+                    </label>
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <div>
+                        <div className="text-xs text-neutral-300">Stereo audio</div>
+                        <div className="text-[10px] text-neutral-500">2-channel output — better fidelity (vs mono)</div>
+                      </div>
+                      <input type="checkbox" checked={voiceStereo} onChange={(e) => setVoiceStereo(e.target.checked)}
                         className="rounded bg-neutral-800 border-neutral-700 text-amber-500 w-4 h-4" />
                     </label>
                     <label className="flex items-center justify-between cursor-pointer">

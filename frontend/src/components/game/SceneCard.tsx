@@ -41,13 +41,28 @@ function loraShortName(id: string): string {
   return LORA_NAMES[id] || id.replace('warmline:', '').replace('@1', '')
 }
 
-// Global audio unlock — once the user interacts with any scene, all scenes can auto-play with sound
+// Global audio unlock — once the user interacts with any scene, all scenes can auto-play with sound.
+// Browser autoplay policies require a user gesture (click/tap/keydown) on this DOCUMENT before
+// programmatic audio.play() will succeed. We listen for the first such gesture page-wide so we
+// don't depend on the user happening to tap the video element specifically.
 let _audioUnlocked = false
 const _audioListeners = new Set<() => void>()
 function globalUnlockAudio() {
   if (_audioUnlocked) return
   _audioUnlocked = true
   _audioListeners.forEach((fn) => fn())
+}
+
+if (typeof window !== 'undefined') {
+  const onFirstGesture = () => {
+    globalUnlockAudio()
+    window.removeEventListener('pointerdown', onFirstGesture, true)
+    window.removeEventListener('touchstart', onFirstGesture, true)
+    window.removeEventListener('keydown', onFirstGesture, true)
+  }
+  window.addEventListener('pointerdown', onFirstGesture, true)
+  window.addEventListener('touchstart', onFirstGesture, { capture: true, passive: true })
+  window.addEventListener('keydown', onFirstGesture, true)
 }
 
 const LINES_PER_PAGE = 3
@@ -181,19 +196,31 @@ export default function SceneCard({
   // - or the video has already arrived (its soundtrack covers the scene)
   const sceneAudioSrc = image.sceneAudioData || image.sceneAudioUrl
   const playStandaloneAudio = !!sceneAudioSrc && !image.sceneVideoUrl && !image.sceneAudioForVideoOnly
+  const audioStartedRef = useRef(false)
   useEffect(() => {
     const a = sceneAudioRef.current
     if (!a || !playStandaloneAudio) return
-    if (isViewing && audioReady) {
-      a.muted = false
+    if (!isViewing) {
+      a.pause()
+      return
+    }
+    a.muted = false
+    // Only reset on the FIRST play of this clip. If the user scrolled away mid-clip
+    // and came back, resume from where they left off (no restart from zero).
+    if (!audioStartedRef.current) {
       a.currentTime = 0
-      a.play().catch(() => {
+      audioStartedRef.current = true
+    }
+    // Try to play unconditionally — the user may have already gestured on the
+    // page (e.g. clicking "Start Game") even if we haven't seen our own gesture
+    // event yet. If autoplay policy blocks it, we'll get an error, fall back to
+    // muted, and try again once the global gesture listener fires.
+    a.play()
+      .then(() => globalUnlockAudio())
+      .catch(() => {
         a.muted = true
         a.play().catch(() => {})
       })
-    } else {
-      a.pause()
-    }
   }, [isViewing, audioReady, playStandaloneAudio])
 
   // Subscribe to global audio unlock

@@ -133,6 +133,7 @@ export async function startGame(params: {
   voice_id?: string
   voice_language?: string
   voice_enhance?: boolean
+  voice_stereo?: boolean
 }) {
   const res = await apiFetch(`/api/game/start`, {
     method: 'POST',
@@ -651,6 +652,9 @@ export async function playgroundTTS(params: {
   voice?: string
   language?: string
   output_format?: string
+  channels?: number
+  sample_rate?: number
+  bitrate?: number
 }): Promise<{
   audio_url: string
   audio_data: string | null

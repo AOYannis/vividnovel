@@ -140,6 +140,33 @@ class SequenceLogger:
         self._print(f"  VIDEO: prompt={prompt[:80]}...")
         self._add("video_request", {"prompt": prompt, "input_image_index": input_image_index})
 
+    def log_tts_request(self, scene_index: int, voice: str, language: str,
+                         text_length: int, dialogue_only: bool, for_video_only: bool,
+                         enhance: bool, stereo: bool):
+        self._print(f"  TTS req scene={scene_index} voice={voice} lang={language} "
+                     f"chars={text_length} dlg_only={dialogue_only} for_video={for_video_only} enh={enhance} stereo={stereo}")
+        self._add("tts_request", {
+            "scene_index": scene_index, "voice": voice, "language": language,
+            "text_length": text_length, "dialogue_only": dialogue_only,
+            "for_video_only": for_video_only, "enhance": enhance, "stereo": stereo,
+        })
+
+    def log_tts_result(self, scene_index: int, audio_url: str, char_count: int,
+                        cost: float, elapsed: float, enhance_elapsed: float,
+                        enhanced_text: str | None = None, backend: str | None = None):
+        self._print(f"  TTS done scene={scene_index} backend={backend or '?'} url={audio_url[:60]}... "
+                     f"chars={char_count} cost=${cost:.4f} tts={elapsed}s enh={enhance_elapsed}s")
+        self._add("tts_result", {
+            "scene_index": scene_index, "audio_url": audio_url, "char_count": char_count,
+            "cost": cost, "elapsed": elapsed, "enhance_elapsed": enhance_elapsed,
+            "enhanced_text": (enhanced_text[:600] if enhanced_text else None),
+            "backend": backend,
+        })
+
+    def log_tts_error(self, scene_index: int, error: str):
+        self._print(f"  TTS ERROR scene={scene_index}: {error}")
+        self._add("tts_error", {"scene_index": scene_index, "error": error})
+
     def log_video_result(self, cost: float, elapsed: float):
         self._print(f"  VIDEO DONE: {elapsed}s | ${cost:.4f}")
         self._add("video_result", {"cost": cost, "elapsed": elapsed})

@@ -78,6 +78,24 @@ def extract_dialogue(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
+_LEAK_PREFIX_RE = __import__("re").compile(
+    # Use [ \t]* instead of \s* so we don't consume the trailing newline (which would
+    # let .* eat the next line of real content).
+    r"^[ \t]*(voice|language|direction|text|brief)[ \t]*:[ \t]*[^\n]*$",
+    __import__("re").IGNORECASE | __import__("re").MULTILINE,
+)
+
+
+def _strip_leaked_metadata(text: str) -> str:
+    """Remove any echoed 'Voice: ...', 'Language: ...', 'Direction: ...', 'Text:' lines
+    that Grok occasionally repeats from the user message — they would otherwise be
+    spoken aloud verbatim by xAI TTS."""
+    cleaned = _LEAK_PREFIX_RE.sub("", text)
+    # Collapse the blank lines we leave behind
+    cleaned = __import__("re").sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
 async def enhance_speech_text(
     grok_client,
     text: str,
@@ -88,16 +106,18 @@ async def enhance_speech_text(
     grok_model: str = "grok-4-1-fast-non-reasoning",
 ) -> tuple[str, float]:
     """Use Grok to rewrite plain text into an xAI-TTS-tagged expressive prompt.
-    Returns (enhanced_text, elapsed_seconds)."""
+    Returns (enhanced_text, elapsed_seconds).
+    Voice/language are NOT included in the user message — they tend to leak back
+    into the output and get spoken aloud. They're only used here for logging context."""
     start = time.time()
     sys_msg = (
         "You are a voice direction assistant. Rewrite the user's text into an "
         "expressive prompt for xAI Text-to-Speech.\n\n" + TTS_TAG_GUIDE
     )
-    user_msg = f"Voice: {voice}\nLanguage: {language}\n"
+    user_msg = ""
     if brief.strip():
-        user_msg += f"Direction: {brief.strip()}\n"
-    user_msg += f"\nText:\n{text.strip()}"
+        user_msg += f"Direction (do NOT echo): {brief.strip()}\n\n"
+    user_msg += text.strip()
 
     resp = await grok_client.chat.completions.create(
         model=grok_model,
@@ -113,6 +133,9 @@ async def enhance_speech_text(
         enhanced = enhanced.strip("`").strip()
     if (enhanced.startswith('"') and enhanced.endswith('"')) or (enhanced.startswith("'") and enhanced.endswith("'")):
         enhanced = enhanced[1:-1].strip()
+    # Defensive scrub in case Grok still echoes header-style metadata
+    enhanced = _strip_leaked_metadata(enhanced)
+    _ = (voice, language)  # acknowledged but intentionally not sent to Grok
     return enhanced, round(time.time() - start, 2)
 
 
@@ -123,22 +146,33 @@ async def generate_speech(
     voice: str = "ara",
     language: str = "fr",
     output_format: str = "MP3",
-    fetch_base64: bool = True,
+    fetch_base64: bool = False,
+    channels: Optional[int] = None,        # 1 = mono, 2 = stereo
+    sample_rate: Optional[int] = None,     # 8000-48000 Hz; allowed: 8000, 16000, 22050, 24000, 44100, 48000
+    bitrate: Optional[int] = None,         # 32-320 kbps (MP3 only)
 ) -> dict:
     """Generate speech audio via Runware xAI TTS.
     Returns: {audio_url, audio_data (data URI or None), char_count, cost, elapsed, voice, language}."""
-    from runware import IAudioInference, IAudioSpeech
+    from runware import IAudioInference, IAudioSpeech, IAudioSettings
 
     if not text.strip():
         raise ValueError("text is required")
 
     start = time.time()
+    audio_settings = None
+    if channels is not None or sample_rate is not None or bitrate is not None:
+        audio_settings = IAudioSettings(
+            sampleRate=sample_rate,
+            bitrate=bitrate,
+            channels=channels,
+        )
     request = IAudioInference(
         taskUUID=str(uuid.uuid4()),
         model="xai:tts@0",
         speech=IAudioSpeech(text=text, voice=voice, language=language),
         outputType="URL",
         outputFormat=output_format,
+        audioSettings=audio_settings,
         includeCost=True,
         deliveryMethod="sync",
     )
@@ -168,4 +202,102 @@ async def generate_speech(
         "char_count": len(text),
         "cost": cost,
         "elapsed": round(time.time() - start, 2),
+        "backend": "runware",
     }
+
+
+# ─── Direct xAI TTS path ─────────────────────────────────────────────────────
+# Faster than going through Runware (~2-3s less per scene) because we skip the
+# extra hop and Runware's CDN-upload step. Returns raw audio bytes — no hosted
+# URL, so this can't feed P-Video's inputs.audio for lip-sync.
+# xAI direct does NOT expose a "channels" field, so output is whatever xAI
+# defaults to (mono). Callers that need stereo must use generate_speech (Runware).
+
+XAI_TTS_ENDPOINT = "https://api.x.ai/v1/tts"
+
+
+async def generate_speech_direct_xai(
+    api_key: str,
+    text: str,
+    *,
+    voice: str = "ara",
+    language: str = "en",
+    output_format: str = "MP3",        # MP3 | WAV | PCM | MULAW | ALAW
+    sample_rate: Optional[int] = None,  # 8000-48000 Hz
+    bitrate: Optional[int] = None,      # 32-320 kbps (MP3 only — value in kbps)
+    optimize_streaming_latency: int = 0,
+) -> dict:
+    """Generate speech directly via xAI's REST endpoint.
+    Returns: {audio_url:'', audio_data: data-URI, char_count, cost:0, elapsed, voice, language, backend:'xai'}.
+
+    The endpoint is unary — returns full bytes after generation. Cost isn't returned by xAI in the
+    response body; xAI bills $4.20 / 1M characters so we compute it locally for parity with Runware.
+    """
+    if not api_key:
+        raise ValueError("XAI_API_KEY not configured")
+    if not text.strip():
+        raise ValueError("text is required")
+
+    codec = (output_format or "MP3").lower()
+    output_format_obj: dict = {"codec": codec}
+    if sample_rate is not None:
+        output_format_obj["sample_rate"] = int(sample_rate)
+    if bitrate is not None and codec == "mp3":
+        # xAI takes bps, our other helper takes kbps — match the runware helper convention here
+        output_format_obj["bit_rate"] = int(bitrate) * 1000
+
+    payload = {
+        "text": text,
+        "voice_id": voice,
+        "language": language,
+        "output_format": output_format_obj,
+        "optimize_streaming_latency": int(optimize_streaming_latency),
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "audio/*",
+    }
+
+    start = time.time()
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(XAI_TTS_ENDPOINT, json=payload, headers=headers) as resp:
+            if resp.status != 200:
+                err_body = await resp.text()
+                raise RuntimeError(f"xAI TTS HTTP {resp.status}: {err_body[:300]}")
+            audio_bytes = await resp.read()
+
+    if not audio_bytes:
+        raise RuntimeError("xAI TTS returned empty body")
+
+    audio_b64 = base64.b64encode(audio_bytes).decode()
+    mime = {"mp3": "audio/mpeg", "wav": "audio/wav", "pcm": "audio/L16",
+            "mulaw": "audio/mulaw", "alaw": "audio/alaw"}.get(codec, "audio/mpeg")
+    # xAI bills per character: $4.20 per 1M chars
+    cost = round(len(text) * 4.20 / 1_000_000, 6)
+    return {
+        "audio_url": "",
+        "audio_data": f"data:{mime};base64,{audio_b64}",
+        "voice": voice,
+        "language": language,
+        "char_count": len(text),
+        "cost": cost,
+        "elapsed": round(time.time() - start, 2),
+        "backend": "xai",
+    }
+
+
+def select_speech_backend(*, prefer_url: bool, stereo: bool) -> str:
+    """Pick the right TTS path:
+    - 'runware' when we need a hosted URL (e.g. for P-Video lip-sync). xAI direct
+      returns raw bytes only.
+    - 'xai' for everything else — significantly faster (skip the Runware proxy +
+      CDN-upload hop). Output is mono regardless of the `stereo` flag, which is a
+      small cosmetic trade for ~3s saved per scene; the browser plays mono through
+      both speakers anyway.
+    """
+    if prefer_url:
+        return "runware"
+    _ = stereo  # accepted for signature compatibility but no longer gates routing
+    return "xai"

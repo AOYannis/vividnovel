@@ -352,6 +352,7 @@ class StoryEngine:
             video_early_started = False
             images_generated = 0
             narration_segments_acc: list[str] = []  # accumulate narration for davinci prompts
+            tts_tasks_by_idx: dict[int, asyncio.Task] = {}  # per-scene TTS tasks (fired at tool-call time)
             choices_provided = False
             sequence_start = time.time()
             grok_input_tokens = 0
@@ -366,6 +367,7 @@ class StoryEngine:
                 await self._flush_completed_images(
                     image_tasks, completed_images, queue,
                     narration_segments=narration_segments_acc, session=session,
+                    tts_tasks=tts_tasks_by_idx,
                 )
 
                 # Early video start: fire video gen as soon as image 0 is ready
@@ -436,6 +438,7 @@ class StoryEngine:
                                 img_idx, img_task, completed_images, queue,
                                 narration_segments=narration_segments_acc, session=session,
                                 _log=log, davinci_fire_tasks=davinci_fire_tasks,
+                                tts_tasks=tts_tasks_by_idx,
                             )
 
                     if choice.finish_reason:
@@ -537,6 +540,36 @@ class StoryEngine:
                                 self._generate_image(args, session.cast, session.style_loras, session.extra_loras, _log=log)
                             )
                             image_tasks[image_index] = img_task
+
+                            # ── Fire TTS NOW (concurrent with image gen) — audio is ready
+                            #    by the time the user lands on the scene, instead of waiting
+                            #    for the image to finish first. ────────────────────────────
+                            voice_narration_on = session.video_settings.get("voice_narration", False) if session else False
+                            if voice_narration_on:
+                                v_voice = session.video_settings.get("voice_id", "ara") if session else "ara"
+                                v_lang = session.video_settings.get("voice_language", "fr") if session else "fr"
+                                v_enhance = session.video_settings.get("voice_enhance", True) if session else True
+                                v_stereo = session.video_settings.get("voice_stereo", True) if session else True
+                                v_to_video = session.video_settings.get("voice_to_video", False) if session else False
+                                v_backend = session.video_settings.get("video_backend", "pvideo") if session else "pvideo"
+                                v_start_scene = session.video_settings.get("video_start_scene", 0) if session else 0
+                                # Same logic as _emit_image_result for dialogue-only / for_video_only:
+                                # only when this scene will actually get a P-Video that uses our audio.
+                                will_have_video = (v_backend == "pvideo") and (image_index >= v_start_scene)
+                                use_dialogue_only = bool(v_to_video and will_have_video)
+                                # Use the latest narration appended for this round
+                                ntext = narration_segments_acc[-1] if narration_segments_acc else ""
+                                if ntext.strip():
+                                    tts_tasks_by_idx[image_index] = self._launch_tts(
+                                        image_index, ntext, queue,
+                                        sequence_number=session.sequence_number if session else 0,
+                                        voice=v_voice, language=v_lang, enhance=v_enhance,
+                                        session_id=session.id if session else "",
+                                        dialogue_only=use_dialogue_only,
+                                        for_video_only=use_dialogue_only,
+                                        stereo=v_stereo,
+                                        log_ref=log,
+                                    )
 
                             scene_actors[image_index] = list(args.get("actors_present", []) or [])
                             await queue.put({
@@ -655,7 +688,29 @@ class StoryEngine:
                             })
 
                 elif finish_reason == "stop":
+                    # Grok ended a turn with text but no tool call. If we haven't fired any
+                    # image yet, this is the "story never starts" failure — log it loudly
+                    # and surface to the client instead of silently completing the sequence.
+                    print(f"[engine] WARNING: finish_reason=stop on round {round_num} with "
+                          f"{images_generated} images so far, content_acc len={len(content_acc)}")
+                    log.log_error(
+                        f"Grok stopped without calling a tool on round {round_num} "
+                        f"(images_generated={images_generated}, content_len={len(content_acc)}). "
+                        f"Last content: {content_acc[:200]!r}"
+                    )
+                    if images_generated == 0:
+                        await queue.put({
+                            "type": "error",
+                            "message": "Grok produced narration but didn't call generate_scene_image. "
+                                       "This usually self-resolves on retry — please start the sequence again.",
+                        })
                     break
+                elif finish_reason and finish_reason not in ("tool_calls",):
+                    # Anything other than stop/tool_calls (e.g. "length", "content_filter") —
+                    # log it so we can diagnose. Loop continues to next round; if there's an
+                    # actual problem the safety limit will catch it.
+                    print(f"[engine] unexpected finish_reason={finish_reason!r} on round {round_num}")
+                    log.log_error(f"Unexpected finish_reason={finish_reason!r} on round {round_num}")
 
                 # If we have all images and choices, we're done
                 if images_generated >= IMAGES_PER_SEQUENCE and choices_provided:
@@ -668,6 +723,7 @@ class StoryEngine:
                         idx, image_tasks[idx], completed_images, queue,
                         narration_segments=narration_segments_acc, session=session,
                         _log=log, davinci_fire_tasks=davinci_fire_tasks,
+                        tts_tasks=tts_tasks_by_idx,
                     )
 
             # Wait for P-Video if it was started (skip if Davinci handles videos)
@@ -1202,13 +1258,20 @@ class StoryEngine:
             "draft": vs.get("draft", VIDEO_DRAFT),
             "audio": vs.get("audio", VIDEO_AUDIO),
         }
-        if "pvideo_prompt_upsampling" in vs and vs["pvideo_prompt_upsampling"] is not None:
+        if audio_url:
+            # Audio carries the scene direction — disable prompt upsampling so Pruna doesn't
+            # re-inflate our minimal prompt and contradict the audio.
+            settings_kwargs["promptUpsampling"] = False
+        elif "pvideo_prompt_upsampling" in vs and vs["pvideo_prompt_upsampling"] is not None:
             settings_kwargs["promptUpsampling"] = vs["pvideo_prompt_upsampling"]
 
         inputs_kwargs: dict = {"frameImages": [IInputFrame(image=input_image_url, frame="first")]}
+        # When audio drives the scene we keep the prompt minimal — verbose narration
+        # competes with the audio for the character's behaviour and tends to hurt lip-sync.
+        effective_prompt = "a person speaking to the camera" if audio_url else prompt
         video_kwargs: dict = {
             "model": VIDEO_MODEL,
-            "positivePrompt": prompt,
+            "positivePrompt": effective_prompt,
             "resolution": vs.get("resolution", VIDEO_RESOLUTION),
             "outputFormat": "MP4",
             "includeCost": True,
@@ -1446,17 +1509,29 @@ class StoryEngine:
         session_id: str,
         dialogue_only: bool = False,
         for_video_only: bool = False,
+        stereo: bool = True,
+        log_ref: 'SequenceLogger | None' = None,
     ) -> str:
         """Generate TTS for a scene's narration, emit scene_audio_ready, return audio URL.
         - dialogue_only: extract only quoted dialogue from the narration before TTS
           (used when feeding the audio into video lip-sync — narration prose isn't spoken).
         - for_video_only: tell the UI not to play this clip standalone (it lives in the video)."""
-        from tts import enhance_speech_text, generate_speech, extract_dialogue
+        from tts import (
+            enhance_speech_text, generate_speech, extract_dialogue,
+            generate_speech_direct_xai, select_speech_backend,
+        )
         audio_url = ""
         try:
             text = (narration_text or "").strip()
             if not text:
+                if log_ref:
+                    log_ref.log_tts_error(scene_index, "narration_text empty — skipped")
                 return ""
+            if log_ref:
+                log_ref.log_tts_request(
+                    scene_index, voice, language, len(text),
+                    dialogue_only, for_video_only, enhance, stereo,
+                )
             if dialogue_only:
                 dlg = extract_dialogue(text)
                 if dlg:
@@ -1476,10 +1551,29 @@ class StoryEngine:
                     print(f"[tts] Scene {scene_index}: enhance failed — {e}, falling back to raw text")
                     spoken = text
             mode_tag = "dialogue" if dialogue_only else "narration"
-            print(f"[tts] Scene {scene_index} (seq {sequence_number}): generating {mode_tag} {voice}/{language} ({len(spoken)}c, enhance={enhance_elapsed}s)...")
-            res = await generate_speech(self.runware, spoken, voice=voice, language=language)
+            backend = select_speech_backend(prefer_url=for_video_only, stereo=stereo)
+            print(f"[tts] Scene {scene_index} (seq {sequence_number}): generating {mode_tag} via {backend} {voice}/{language} ({len(spoken)}c, enhance={enhance_elapsed}s)...")
+            if backend == "xai":
+                from config import XAI_API_KEY
+                res = await generate_speech_direct_xai(
+                    XAI_API_KEY, spoken,
+                    voice=voice, language=language,
+                )
+            else:
+                res = await generate_speech(
+                    self.runware, spoken,
+                    voice=voice, language=language,
+                    channels=2 if stereo else 1,
+                )
             audio_url = res.get("audio_url", "") or ""
             print(f"[tts] Scene {scene_index}: done in {res.get('elapsed')}s (${res.get('cost', 0):.4f})")
+            if log_ref:
+                log_ref.log_tts_result(
+                    scene_index, audio_url, res.get("char_count", 0),
+                    res.get("cost", 0), res.get("elapsed", 0), enhance_elapsed,
+                    enhanced_text=spoken if enhance else None,
+                    backend=res.get("backend"),
+                )
             await sse_queue.put({
                 "type": "scene_audio_ready",
                 "index": scene_index,
@@ -1494,6 +1588,7 @@ class StoryEngine:
                 "enhanced_text": spoken if enhance else None,
                 "for_video_only": for_video_only,
                 "dialogue_only": dialogue_only,
+                "backend": res.get("backend"),
             })
             if session_id and audio_url:
                 import db as _db
@@ -1503,6 +1598,8 @@ class StoryEngine:
                     ))
         except Exception as e:
             print(f"[tts] Scene {scene_index}: error — {e}")
+            if log_ref:
+                log_ref.log_tts_error(scene_index, str(e))
             await sse_queue.put({
                 "type": "scene_audio_error",
                 "index": scene_index,
@@ -1523,6 +1620,8 @@ class StoryEngine:
         session_id: str = "",
         dialogue_only: bool = False,
         for_video_only: bool = False,
+        stereo: bool = True,
+        log_ref: 'SequenceLogger | None' = None,
     ) -> asyncio.Task:
         """Launch a TTS task for the given scene's narration. Returns the task so the
         caller can await the audio URL (e.g. for voice-to-video chaining)."""
@@ -1534,6 +1633,7 @@ class StoryEngine:
             scene_index, narration_text, sse_queue, sequence_number,
             voice, language, enhance, session_id,
             dialogue_only=dialogue_only, for_video_only=for_video_only,
+            stereo=stereo, log_ref=log_ref,
         ))
         StoryEngine._tts_tasks.append(task)
         return task
@@ -1544,6 +1644,7 @@ class StoryEngine:
         session: 'GameSession | None' = None,
         _log: 'SequenceLogger | None' = None,
         davinci_fire_tasks: list | None = None,
+        tts_tasks: dict[int, asyncio.Task] | None = None,
     ):
         """Check and emit any completed image tasks."""
         for idx, task in list(tasks.items()):
@@ -1552,6 +1653,7 @@ class StoryEngine:
                     idx, task, completed, queue,
                     narration_segments=narration_segments, session=session,
                     _log=_log, davinci_fire_tasks=davinci_fire_tasks,
+                    tts_tasks=tts_tasks,
                 )
 
     async def _emit_image_result(
@@ -1560,6 +1662,7 @@ class StoryEngine:
         session: 'GameSession | None' = None,
         _log: 'SequenceLogger | None' = None,
         davinci_fire_tasks: list | None = None,
+        tts_tasks: dict[int, asyncio.Task] | None = None,
     ):
         """Emit image_ready or image_error event. Optionally fire Davinci video gen."""
         try:
@@ -1586,35 +1689,13 @@ class StoryEngine:
                 video_backend = "none"
             print(f"[video] Scene {idx}: video_backend={video_backend}, has_url={bool(result.get('url'))}, start_scene={video_start_scene}")
 
-            # ── TTS narration (independent of video) ──
-            voice_narration = session.video_settings.get("voice_narration", False) if session else False
+            # ── TTS was launched at tool-call time (in the streaming loop), so the audio
+            #    has been generating in parallel with the image. Pick up the task here only
+            #    so voice_to_video can chain video on the audio URL. ─────────────────────
             voice_to_video = session.video_settings.get("voice_to_video", False) if session else False
-            voice_id = session.video_settings.get("voice_id", "ara") if session else "ara"
-            voice_lang = session.video_settings.get("voice_language", "fr") if session else "fr"
-            voice_enhance = session.video_settings.get("voice_enhance", True) if session else True
             _seq_num = session.sequence_number if session else 0
             _session_id = session.id if session else ""
-            narration_text_for_tts = narration_segments[idx] if (narration_segments and idx < len(narration_segments)) else ""
-
-            # Decide TTS mode based on whether this scene will lip-sync video to it:
-            # - voice_to_video=True AND scene has a video → dialogue-only audio drives the video,
-            #   no standalone playback (the video carries the audio).
-            # - Otherwise → full narration, played standalone on still scenes.
-            scene_will_have_video = (
-                video_backend != "none" and bool(result.get("url")) and narration_segments
-            )
-            use_dialogue_only = bool(voice_to_video and scene_will_have_video and video_backend == "pvideo")
-
-            tts_task: asyncio.Task | None = None
-            if voice_narration and narration_text_for_tts.strip():
-                tts_task = self._launch_tts(
-                    idx, narration_text_for_tts, queue,
-                    sequence_number=_seq_num,
-                    voice=voice_id, language=voice_lang, enhance=voice_enhance,
-                    session_id=_session_id,
-                    dialogue_only=use_dialogue_only,
-                    for_video_only=use_dialogue_only,
-                )
+            tts_task: asyncio.Task | None = (tts_tasks or {}).get(idx)
 
             if result.get("url") and narration_segments and video_backend != "none":
                 if video_backend == "pvideo":

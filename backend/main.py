@@ -103,8 +103,9 @@ class StartGameRequest(BaseModel):
     voice_narration: bool = False        # Generate per-scene TTS audio
     voice_to_video: bool = False         # Use TTS audio as soundtrack of P-Video
     voice_id: str = "ara"                # ara | eve | leo | rex | sal
-    voice_language: str = "fr"           # auto | en | fr | es-ES | ...
+    voice_language: Optional[str] = None # auto | en | fr | es-ES | ...; None → fall back to game language
     voice_enhance: bool = True           # Pre-enhance narration with Grok before TTS
+    voice_stereo: bool = True            # 2-channel output (vs mono)
 
 
 class PreviewPromptRequest(BaseModel):
@@ -260,8 +261,10 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
     session.video_settings["voice_narration"] = req.voice_narration
     session.video_settings["voice_to_video"] = req.voice_to_video
     session.video_settings["voice_id"] = req.voice_id
-    session.video_settings["voice_language"] = req.voice_language
+    # Fall back to the game's narration language if voice_language wasn't explicitly set
+    session.video_settings["voice_language"] = (req.voice_language or req.language or "fr")
     session.video_settings["voice_enhance"] = req.voice_enhance
+    session.video_settings["voice_stereo"] = req.voice_stereo
     # Patch custom character description into ACTOR_REGISTRY for this session
     if req.custom_character_desc:
         session._custom_actor_override = {
@@ -2002,22 +2005,39 @@ class TTSRequest(BaseModel):
     text: str
     voice: str = "eve"
     language: str = "en"
-    output_format: str = "MP3"      # MP3 | WAV | FLAC | OGG
+    output_format: str = "MP3"          # MP3 | WAV | FLAC | OGG
+    channels: Optional[int] = None      # 1 = mono, 2 = stereo
+    sample_rate: Optional[int] = None   # 8000-48000 Hz
+    bitrate: Optional[int] = None       # 32-320 kbps (MP3 only)
 
 
 @app.post("/api/playground/tts")
 async def playground_tts(req: TTSRequest):
-    """Generate speech audio via Runware xAI TTS. Returns hosted URL + base64."""
-    from tts import generate_speech
-    if runware_client is None:
-        raise HTTPException(503, "Runware client not connected")
+    """Generate speech audio. Routes to direct xAI (faster) for mono playback,
+    Runware (~2-3s slower) when stereo is requested (xAI direct doesn't expose channels)."""
+    from tts import generate_speech, generate_speech_direct_xai, select_speech_backend
     if not req.text.strip():
         raise HTTPException(400, "text is required")
+
+    want_stereo = req.channels == 2
+    backend = select_speech_backend(prefer_url=False, stereo=want_stereo)
     try:
+        if backend == "xai":
+            return await generate_speech_direct_xai(
+                XAI_API_KEY, req.text,
+                voice=req.voice, language=req.language, output_format=req.output_format,
+                sample_rate=req.sample_rate, bitrate=req.bitrate,
+            )
+        if runware_client is None:
+            raise HTTPException(503, "Runware client not connected")
         return await generate_speech(
             runware_client, req.text,
             voice=req.voice, language=req.language, output_format=req.output_format,
+            channels=req.channels, sample_rate=req.sample_rate, bitrate=req.bitrate,
+            fetch_base64=True,  # playground inline player wants instant base64 playback
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"TTS generation failed: {e}")
 
@@ -2049,7 +2069,9 @@ async def playground_audio_video(req: AudioVideoRequest):
     if not req.image_url.strip() or not req.audio_url.strip():
         raise HTTPException(400, "image_url and audio_url are required")
 
-    prompt = req.prompt.strip() or "a person speaking naturally to the camera, expressive face, subtle motion"
+    # When audio drives the scene we keep the prompt minimal — verbose prompts compete
+    # with the audio for the character's behaviour and tend to hurt lip-sync.
+    prompt = req.prompt.strip() or "a person speaking to the camera"
     start = _time.time()
 
     try:
@@ -2066,7 +2088,8 @@ async def playground_audio_video(req: AudioVideoRequest):
                 frameImages=[IInputFrame(image=req.image_url, frame="first")],
                 audio=req.audio_url,
             ),
-            settings=ISettings(audio=True, draft=req.draft, promptUpsampling=True),
+            # promptUpsampling=False so Pruna doesn't re-inflate the minimal prompt
+            settings=ISettings(audio=True, draft=req.draft, promptUpsampling=False),
         )
         result = await runware_client.videoInference(requestVideo=request)
         if isinstance(result, IAsyncTaskResponse):

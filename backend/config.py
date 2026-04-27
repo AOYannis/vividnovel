@@ -141,6 +141,13 @@ ACTOR_REGISTRY = {
         "default_weight": 0.8,
         "description": "Woman with short white/platinum hair, striking look",
     },
+    "nesra": {
+        "display_name": "Nesra",
+        "lora_id": "warmline:202604260002@1",
+        "trigger_word": "nesra",
+        "default_weight": 0.8,
+        "description": "European-Asian mix, layered curly hair, freckles, hazel-green eyes",
+    },
     "ciri": {
         "display_name": "Ciri (Witcher)",
         "lora_id": None,
@@ -618,6 +625,8 @@ AVAILABLE_LORAS = [
     {"id": TITJOB_LORA_ID, "name": "Nsfw Titjob", "type": "style", "trigger": "Nsfw_Titjob"},
     {"id": POVHJ_LORA_ID, "name": "POV Handjob (povhj)", "type": "style", "trigger": "povhj"},
     {"id": "warmline:202604110001@1", "name": "ZPenis V2", "type": "style"},
+    {"id": "warmline:202604260001@1", "name": "Mishra v5", "type": "style", "trigger": "mishra"},
+    {"id": "warmline:202604260002@1", "name": "Nesra V3", "type": "character", "trigger": "nesra"},
 ]
 
 # ─── Settings ────────────────────────────────────────────────────────────────
