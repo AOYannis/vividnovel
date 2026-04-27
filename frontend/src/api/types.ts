@@ -115,6 +115,56 @@ export interface ImageSlot {
   actors?: string[]
 }
 
+// ─── Slice-of-life world ─────────────────────────────────────────────────────
+
+export type WorldSlot = 'morning' | 'afternoon' | 'evening' | 'night'
+
+export interface Location {
+  id: string
+  name: string
+  type: string         // cafe | bar | home | work | gym | park | club | salon | other
+  description: string
+}
+
+export interface WorldHistoryEntry {
+  day: number
+  slot: WorldSlot
+  location: string
+}
+
+export interface WorldState {
+  day: number
+  slot: WorldSlot
+  locations: Location[]
+  current_location: string
+  history: WorldHistoryEntry[]
+}
+
+export interface CharacterState {
+  code: string
+  personality: string
+  job: string
+  schedule: Record<string, string>     // 'weekday_morning' → 'cafe_du_coin' or 'a|b' or 'free'
+  overrides: Record<string, string>    // '<day>_<slot>' → loc_id (rendez-vous)
+  today_mood: string
+  intentions_toward_player: string
+}
+
+export interface KnownWhereabout {
+  char: string
+  location_id: string
+  day: number
+  slot: WorldSlot
+  source: string          // short verbatim / paraphrase
+}
+
+export interface WorldPayload {
+  world: WorldState | null
+  character_states?: Record<string, CharacterState>
+  known_whereabouts?: KnownWhereabout[]
+  presence_now?: Record<string, string[]>   // loc_id → [char_codes]
+}
+
 // ─── Story Sequence ──────────────────────────────────────────────────────────
 
 export interface NarrationSegment {

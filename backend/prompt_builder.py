@@ -35,6 +35,9 @@ def build_system_prompt(
     custom_actor_override: dict | None = None,
     language: str = "fr",
     relationships: dict | None = None,
+    world=None,  # Optional WorldState — when set, swaps intro arc for slice-of-life context
+    character_states: dict | None = None,  # Phase 2: dict[code → CharacterState]
+    present_characters: list[str] | None = None,  # Phase 2: who's at current loc/slot
 ) -> str:
     lang_config = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES["fr"])
     setting = SETTINGS.get(setting_id)
@@ -146,65 +149,95 @@ def build_system_prompt(
 
     # ─── Storytelling philosophy ─────────────────────────
     sections = static_sections
-    sections.append(
-        "## Approche narrative\n"
-        "\n"
-        "Tu es un SCÉNARISTE. Tu décris un storyboard — une suite de plans de caméra\n"
-        "qui racontent une VRAIE histoire, riche et immersive.\n"
-        "\n"
-        "### Structure générale\n"
-        "L'histoire commence par un **INTRO ARC de 2 séquences** où le joueur rencontre\n"
-        "TOUS les personnages du casting (chacun avec un mini-arc, dans une situation distincte).\n"
-        "Après ces 2 séquences, le joueur a fait connaissance et choisit qui suivre — l'histoire\n"
-        "se poursuit librement avec ce personnage, mais les autres restent disponibles pour recroiser\n"
-        "le joueur, créer des tensions, ou ouvrir de nouveaux arcs en parallèle.\n"
-        "\n"
-        "### Principes fondamentaux\n"
-        "- Le joueur vit une AVENTURE — pas une course vers le sexe\n"
-        "- Les personnages sont des VRAIES PERSONNES : ils ont une vie, des opinions,\n"
-        "  des résistances, des humeurs. Ils ne tombent pas immédiatement dans les bras du joueur.\n"
-        "- La séduction est un PROCESSUS : regards, conversations, confiance, complicité,\n"
-        "  moments partagés, PUIS intimité — si le joueur fait les bons choix.\n"
-        "- Le joueur a un QUOTIDIEN : travail, amis, trajets, repas, hobbies.\n"
-        "  L'histoire le montre vivre sa vie, pas seulement draguer.\n"
-        "- Les relations se construisent sur PLUSIEURS séquences. Une rencontre au bar\n"
-        "  ne mène pas au lit dans la même séquence. Il faut du temps, des rendez-vous,\n"
-        "  des rebondissements.\n"
-        "- Le joueur peut rencontrer PLUSIEURS personnages et développer des relations\n"
-        "  parallèles — chacune à son propre rythme.\n"
-        "- L'histoire doit donner un SENTIMENT DE LIBERTÉ : le joueur fait ce qu'il veut,\n"
-        "  va où il veut, parle à qui il veut.\n"
-        "\n"
-        "### Rythme\n"
-        "- Chaque scène = 10 SECONDES de film. Il se passe PEU de choses.\n"
-        "- NE PAS aller trop vite : la tension narrative est plus intéressante que sa résolution.\n"
-        "- Les premières séquences avec un personnage doivent être de la DÉCOUVERTE :\n"
-        "  conversation, flirt léger, mystère, jeux de pouvoir. Pas de contact physique poussé.\n"
-        "- Les scènes intimes arrivent NATURELLEMENT après plusieurs séquences de construction\n"
-        "  — jamais lors d'une première rencontre sauf si le joueur force la situation\n"
-        "  (et même alors, le personnage peut résister ou poser des conditions).\n"
-        "- Varie les tonalités : humour, tension, tendresse, danger, mystère, quotidien banal\n"
-        "- Reste fidèle au CADRE (pas d'éléments fantastiques dans un cadre réaliste)\n"
-        "- L'histoire ne se termine JAMAIS — chaque fin de séquence ouvre une suite\n"
-        "\n"
-        "### Moods visuels\n"
-        "Les moods explicites ne sont PAS disponibles dès le début avec un personnage.\n"
-        "- Premières rencontres : `neutral` uniquement\n"
-        "- Après quelques séquences de construction : `sensual_tease` autorisé\n"
-        "- Intimité explicite : seulement quand la relation est ÉTABLIE et que le joueur\n"
-        "  a fait des choix qui mènent naturellement à ce moment\n"
-        "- C'est la RELATION qui détermine le mood, pas le numéro de séquence\n"
-        "\n"
-        "### Choix (4 choix obligatoires)\n"
-        "À la fin de chaque séquence, propose 4 choix (a, b, c, d).\n"
-        "- Choix a, b, c : 3 décisions qui découlent LOGIQUEMENT de ce qui vient de se passer,\n"
-        "  chacune menant l'histoire dans une direction DIFFÉRENTE\n"
-        "- Choix d : toujours un « retour au quotidien » — le joueur quitte la situation actuelle,\n"
-        "  rentre chez lui ou passe à autre chose. L'arc en cours est mis en pause (pas abandonné —\n"
-        "  il pourra y revenir plus tard). Les séquences suivantes explorent un NOUVEL arc narratif\n"
-        "  (nouveau lieu, nouvelles rencontres, vie quotidienne) avant de potentiellement recroiser\n"
-        "  les personnages précédents. Formule le comme un choix naturel, pas un bouton « quitter »."
-    )
+    if world is not None:
+        # SLICE-OF-LIFE philosophy — completely replaces the classic "scénariste / intro arc /
+        # build relationships over many sequences" framing. Tight, no scene-type examples.
+        sections.append(
+            "## Approche narrative — MODE SLICE-OF-LIFE\n"
+            "\n"
+            "Tu n'écris PAS une histoire avec un arc imposé. Tu décris ce qui SE PASSE\n"
+            "MAINTENANT pour le joueur, dans ce LIEU, à cette HEURE — comme une caméra qui\n"
+            "filmerait un instant de sa vie quotidienne.\n"
+            "\n"
+            "### Règles fondamentales\n"
+            "- Le joueur a sa vie. Les personnages ont la leur. La plupart des moments du\n"
+            "  joueur seront SEULS ou avec des inconnus (PNJ transitoires). C'est NORMAL.\n"
+            "- Les personnages du casting n'apparaissent PAS au gré de la narration : ils\n"
+            "  apparaissent UNIQUEMENT quand le résolveur de présence le dit (section\n"
+            "  « Personnages présents » plus bas). N'INVENTE jamais leur présence.\n"
+            "- Aucun arc d'introduction. Aucun défilé. Aucune mini-vignette par personnage.\n"
+            "- La séduction est un PROCESSUS LENT — peu probable au premier croisement.\n"
+            "  Le mood gating reste appliqué (cf. État des relations).\n"
+            "- Une séquence peut être très calme : café, marche, attente, téléphone, repas.\n"
+            "  La banalité du quotidien est ESSENTIELLE pour donner du poids aux rencontres.\n"
+            "\n"
+            "### Choix (4 choix obligatoires)\n"
+            "À la fin de chaque séquence, propose 4 choix (a, b, c, d) qui découlent\n"
+            "NATURELLEMENT de la scène. Plusieurs choix peuvent rester DANS le même lieu/moment\n"
+            "(continuer, observer, engager la conversation) — souhaité, ça crée le rythme\n"
+            "cinématographique. Au moins un choix peut amorcer une transition (rentrer dormir,\n"
+            "proposer un endroit). Un 5ème choix « Aller ailleurs » sera AJOUTÉ par l'interface."
+        )
+    else:
+        sections.append(
+            "## Approche narrative\n"
+            "\n"
+            "Tu es un SCÉNARISTE. Tu décris un storyboard — une suite de plans de caméra\n"
+            "qui racontent une VRAIE histoire, riche et immersive.\n"
+            "\n"
+            "### Structure générale\n"
+            "L'histoire commence par un **INTRO ARC de 2 séquences** où le joueur rencontre\n"
+            "TOUS les personnages du casting (chacun avec un mini-arc, dans une situation distincte).\n"
+            "Après ces 2 séquences, le joueur a fait connaissance et choisit qui suivre — l'histoire\n"
+            "se poursuit librement avec ce personnage, mais les autres restent disponibles pour recroiser\n"
+            "le joueur, créer des tensions, ou ouvrir de nouveaux arcs en parallèle.\n"
+            "\n"
+            "### Principes fondamentaux\n"
+            "- Le joueur vit une AVENTURE — pas une course vers le sexe\n"
+            "- Les personnages sont des VRAIES PERSONNES : ils ont une vie, des opinions,\n"
+            "  des résistances, des humeurs. Ils ne tombent pas immédiatement dans les bras du joueur.\n"
+            "- La séduction est un PROCESSUS : regards, conversations, confiance, complicité,\n"
+            "  moments partagés, PUIS intimité — si le joueur fait les bons choix.\n"
+            "- Le joueur a un QUOTIDIEN : travail, amis, trajets, repas, hobbies.\n"
+            "  L'histoire le montre vivre sa vie, pas seulement draguer.\n"
+            "- Les relations se construisent sur PLUSIEURS séquences. Une rencontre au bar\n"
+            "  ne mène pas au lit dans la même séquence. Il faut du temps, des rendez-vous,\n"
+            "  des rebondissements.\n"
+            "- Le joueur peut rencontrer PLUSIEURS personnages et développer des relations\n"
+            "  parallèles — chacune à son propre rythme.\n"
+            "- L'histoire doit donner un SENTIMENT DE LIBERTÉ : le joueur fait ce qu'il veut,\n"
+            "  va où il veut, parle à qui il veut.\n"
+            "\n"
+            "### Rythme\n"
+            "- Chaque scène = 10 SECONDES de film. Il se passe PEU de choses.\n"
+            "- NE PAS aller trop vite : la tension narrative est plus intéressante que sa résolution.\n"
+            "- Les premières séquences avec un personnage doivent être de la DÉCOUVERTE :\n"
+            "  conversation, flirt léger, mystère, jeux de pouvoir. Pas de contact physique poussé.\n"
+            "- Les scènes intimes arrivent NATURELLEMENT après plusieurs séquences de construction\n"
+            "  — jamais lors d'une première rencontre sauf si le joueur force la situation\n"
+            "  (et même alors, le personnage peut résister ou poser des conditions).\n"
+            "- Varie les tonalités : humour, tension, tendresse, danger, mystère, quotidien banal\n"
+            "- Reste fidèle au CADRE (pas d'éléments fantastiques dans un cadre réaliste)\n"
+            "- L'histoire ne se termine JAMAIS — chaque fin de séquence ouvre une suite\n"
+            "\n"
+            "### Moods visuels\n"
+            "Les moods explicites ne sont PAS disponibles dès le début avec un personnage.\n"
+            "- Premières rencontres : `neutral` uniquement\n"
+            "- Après quelques séquences de construction : `sensual_tease` autorisé\n"
+            "- Intimité explicite : seulement quand la relation est ÉTABLIE et que le joueur\n"
+            "  a fait des choix qui mènent naturellement à ce moment\n"
+            "- C'est la RELATION qui détermine le mood, pas le numéro de séquence\n"
+            "\n"
+            "### Choix (4 choix obligatoires)\n"
+            "À la fin de chaque séquence, propose 4 choix (a, b, c, d).\n"
+            "- Choix a, b, c : 3 décisions qui découlent LOGIQUEMENT de ce qui vient de se passer,\n"
+            "  chacune menant l'histoire dans une direction DIFFÉRENTE\n"
+            "- Choix d : toujours un « retour au quotidien » — le joueur quitte la situation actuelle,\n"
+            "  rentre chez lui ou passe à autre chose. L'arc en cours est mis en pause (pas abandonné —\n"
+            "  il pourra y revenir plus tard). Les séquences suivantes explorent un NOUVEL arc narratif\n"
+            "  (nouveau lieu, nouvelles rencontres, vie quotidienne) avant de potentiellement recroiser\n"
+            "  les personnages précédents. Formule le comme un choix naturel, pas un bouton « quitter »."
+        )
 
     # ─── Memory usage guidelines ──────────────────────────
     # static — same content every call
@@ -283,13 +316,44 @@ def build_system_prompt(
 
     setting_label = setting['label'] if setting else (custom_setting_text[:50] if custom_setting_text else "le cadre choisi")
 
+    if world is not None:
+        # Slice-of-life: characters have lives, NOT a forced intro queue
+        cast_intro = (
+            f"{len(cast_actors)} personnage(s) dans l'univers du joueur. Ils ne forment PAS un "
+            f"casting à présenter en série. Chacun a SA PROPRE VIE — boulot, hobbies, lieux qu'il "
+            f"fréquente, horaires habituels — déduits de son DESCRIPTION ci-dessous et du CADRE.\n"
+            f"\n"
+            f"⚠️ **RÈGLES D'APPARITION** (slice-of-life, lis attentivement) :\n"
+            f"1. Un personnage n'apparaît QUE si l'endroit ET l'heure correspondent à sa vie. Une "
+            f"prof de yoga le matin au studio = oui. La même au bar à 2h du mat = très improbable.\n"
+            f"2. Les personnages NE SUIVENT PAS le joueur. Si le joueur change de lieu, le perso "
+            f"reste à sa propre vie SAUF si :\n"
+            f"   (a) le lieu de destination est aussi naturel pour lui (il y va souvent), OU\n"
+            f"   (b) le joueur l'a EXPLICITEMENT invité dans le choix précédent (« Inviter X à "
+            f"venir avec toi »).\n"
+            f"3. La PREMIÈRE séquence n'est PAS un défilé. Au début, ne fais apparaître AUCUN "
+            f"personnage du casting principal sauf si le lieu/heure le justifie pile (ex: la voisine "
+            f"qu'on croise dans l'escalier en sortant de chez soi). Le joueur DOIT pouvoir vivre "
+            f"plusieurs séquences seul, en explorant la ville, AVANT de croiser quelqu'un du casting.\n"
+            f"4. Si tu hésites entre « faire apparaître X » ou « atmosphère sans personne du "
+            f"casting » → choisis l'atmosphère. La rareté rend les rencontres marquantes.\n"
+            f"5. Tu peux toujours utiliser des PNJ secondaires (serveuse, voisin, inconnu) sans "
+            f"qu'ils fassent partie du casting principal.\n"
+            f"\n"
+        )
+    else:
+        # Classic mode (intro arc forced)
+        cast_intro = (
+            f"{len(cast_actors)} personnage(s) dans le casting du joueur. Tous doivent être présentés au joueur "
+            f"dans les **2 premières séquences (intro arc)**, chacun avec un mini-arc narratif distinct.\n"
+            f"Aucun ordre de priorité — c'est le joueur qui décidera lequel suivre par ses choix.\n"
+            f"Après les séquences d'intro, les personnages non choisis restent disponibles : ils peuvent recroiser "
+            f"le joueur plus tard, dans les mêmes ou de nouvelles situations.\n\n"
+        )
+
     cast_text = (
         f"## Casting\n"
-        f"{len(cast_actors)} personnage(s) dans le casting du joueur. Tous doivent être présentés au joueur "
-        f"dans les **2 premières séquences (intro arc)**, chacun avec un mini-arc narratif distinct.\n"
-        f"Aucun ordre de priorité — c'est le joueur qui décidera lequel suivre par ses choix.\n"
-        f"Après les séquences d'intro, les personnages non choisis restent disponibles : ils peuvent recroiser "
-        f"le joueur plus tard, dans les mêmes ou de nouvelles situations.\n\n"
+        + cast_intro +
         f"IMPORTANT : dans l'histoire, donne-leur un PRÉNOM crédible et adapté au cadre "
         f"(pas leur nom technique). Mais dans les appels generate_scene_image, "
         f"utilise TOUJOURS leur codename technique dans actors_present.\n\n"
@@ -304,29 +368,43 @@ def build_system_prompt(
         f"recopier ni les paraphraser dans la narration.\n"
     )
     actor_genders = (cast or {}).get("actor_genders", {}) or {}
+    # In slice mode WITH agent states, we serve a slim per-character summary
+    # here (personality + job from the agent state, plus trigger word + visual
+    # description for image prompts). Full memory + intentions are injected
+    # only for characters PRESENT in the current scene (block further down).
+    slice_with_agents = world is not None and bool(character_states)
     for i, (code, actor_data) in enumerate(cast_actors):
         is_custom = actor_data.get('is_custom', False)
         gender = actor_genders.get(code, "female")
         gender_label = " — TRANS / SHEMALE" if gender == "trans" else ""
-        cast_text += (
-            f"\n### Personnage {i + 1} (codename: {code}){gender_label}\n"
-            f"- Apparence (POUR IMAGE PROMPTS UNIQUEMENT, ne pas mentionner dans la narration) : {actor_data['description']}\n"
-            f"{_actor_prompt_instruction(actor_data, code)}\n"
-        )
+
+        if slice_with_agents and code in character_states:
+            cs = character_states[code]
+            cast_text += (
+                f"\n### {code}{gender_label}\n"
+                f"- Personnalité : {cs.personality or '—'}\n"
+                f"- Job / vie : {cs.job or '—'}\n"
+                f"- Apparence (POUR IMAGE PROMPTS UNIQUEMENT) : {actor_data['description']}\n"
+                f"{_actor_prompt_instruction(actor_data, code)}\n"
+            )
+        else:
+            cast_text += (
+                f"\n### Personnage {i + 1} (codename: {code}){gender_label}\n"
+                f"- Apparence (POUR IMAGE PROMPTS UNIQUEMENT, ne pas mentionner dans la narration) : {actor_data['description']}\n"
+                f"{_actor_prompt_instruction(actor_data, code)}\n"
+            )
         if is_custom:
             cast_text += f"- Personnage personnalisé : invente une apparence cohérente avec le cadre\n"
-        else:
+        elif not slice_with_agents:
+            # In slice mode the prénom is already implicit via personality/job; in classic mode keep the full instruction
             cast_text += f"- Donne-lui un prénom adapté au cadre ({setting_label}) — INVENTE un prénom local, n'utilise PAS de nom de personnage célèbre\n"
         if gender == "trans":
             cast_text += (
-                f"- ⚠️ **Personnage TRANS / SHEMALE** : c'est une femme avec un pénis. "
-                f"En narration, traite-la comme une femme normale (elle, son prénom féminin, etc.) "
-                f"et n'évoque sa particularité que quand le contexte le justifie naturellement "
-                f"(scène de déshabillage, intimité, révélation). "
-                f"En image_prompt, mentionne « trans woman with erect penis » dans les scènes "
-                f"où elle est nue ou en intimité explicite — le système ajoute automatiquement "
-                f"le LoRA d'anatomie. Pour la levrette (`doggystyle`), évite ce mood (bug visuel) "
-                f"et préfère `anal_doggystyle` ou `cowgirl` qui rendent mieux.\n"
+                f"- ⚠️ **Personnage TRANS / SHEMALE** : femme avec pénis. En narration, traite-la "
+                f"comme une femme normale (elle, prénom féminin) ; n'évoque sa particularité que "
+                f"quand le contexte le justifie naturellement. En image_prompt, mentionne "
+                f"« trans woman with erect penis » dans les scènes nues / intimes (LoRA d'anatomie ajouté auto). "
+                f"Pour la levrette préfère `anal_doggystyle` à `doggystyle` (bug visuel).\n"
             )
 
     cast_text += (
@@ -403,35 +481,62 @@ def build_system_prompt(
         sections.append(pool_text)
 
     # ─── Secondary characters (on-the-fly casting) ───────
-    secondary_cast_text = (
-        "## Personnages secondaires (casting à la volée)\n"
-        "L'histoire a besoin de personnages au-delà du casting principal.\n\n"
-        "### OPTION 1 (PRÉFÉRÉE) : Utiliser un acteur du POOL\n"
-        "Si le personnage secondaire est une FEMME, utilise de préférence un acteur "
-        "du pool (section « Personnages disponibles ») — il aura un LoRA dédié et "
-        "sera visuellement cohérent. Pour cela :\n"
-        "- Mets son codename dans `actors_present` (pas dans `secondary_characters`)\n"
-        "- Mets son trigger word dans le prompt image\n"
-        "- Déclare son nom dans `character_names`\n"
-        "- Le LoRA sera automatiquement chargé\n\n"
-        "### OPTION 2 : Créer un personnage sans LoRA\n"
-        "Pour les personnages masculins ou les personnages féminins hors du pool, "
-        "utilise `secondary_characters` avec une description détaillée.\n"
-        "- Invente un **codename stable** (ex: `neighbor_mila`, `friend_jules`)\n"
-        "- Fournis une **description physique détaillée EN ANGLAIS**\n"
-        "- Réutilise **EXACTEMENT** le même codename et description à chaque apparition\n\n"
-        "Pour les hommes, utilise un ancrage par acteur célèbre dans la description "
-        "technique UNIQUEMENT (champ `secondary_characters`, en anglais) :\n"
-        "- 'resembling a young Oscar Isaac, early 30s, olive-toned skin...'\n"
-        "- 'with the build of Idris Elba, tall, deep voice...'\n\n"
-        "⚠️ Ne JAMAIS mentionner le nom d'un acteur célèbre dans la NARRATION. "
-        "L'ancrage est UNIQUEMENT pour le prompt image.\n\n"
-        "### Règles\n"
-        "- Un personnage secondaire peut devenir PRINCIPAL si le joueur le choisit\n"
-        "- Sa description DOIT être identique à chaque apparition (copier-coller)\n"
-        "- Il peut avoir des vêtements différents (mis à jour dans clothing_state)\n"
-        "- N'introduis pas plus de 1-2 nouveaux personnages par séquence"
-    )
+    if world is not None:
+        # SLICE-OF-LIFE: forbid recurring NPC invention. Only cast actors get LoRA-backed
+        # consistent appearances; any other figure must be transient (server, passer-by)
+        # with no codename and no return appearance.
+        secondary_cast_text = (
+            "## Personnages secondaires — RÈGLES SLICE-OF-LIFE\n"
+            "\n"
+            "⛔ NE PAS inventer de personnages récurrents (« neighbor_mila », « friend_jules », etc.).\n"
+            "    Ces personnages n'ont pas de LoRA → ils seront visuellement INCOHÉRENTS d'une\n"
+            "    scène à l'autre. Le joueur a déjà son casting (avec LoRAs) ; les autres figures\n"
+            "    sont des PNJ TRANSITOIRES.\n"
+            "\n"
+            "✅ PNJ transitoires autorisés :\n"
+            "- Serveur, serveuse, barman, passant, voisin entr'aperçu, livreur, inconnu qui\n"
+            "  demande un briquet — UNE scène, pas de codename, pas de retour.\n"
+            "- Décris-les dans la narration avec leur fonction (« le serveur passe », « une "
+            "femme à la table d'à côté »), JAMAIS avec un prénom récurrent.\n"
+            "- N'utilise PAS le champ `secondary_characters` (le système ne le persiste pas\n"
+            "  en mode slice-of-life). Mets une description courte directement dans l'image_prompt\n"
+            "  si nécessaire (ex: « a young waiter in a black apron passes by »).\n"
+            "\n"
+            "✅ Personnages du casting (acteurs avec LoRA) :\n"
+            "- Apparaissent UNIQUEMENT quand le résolveur de présence le dit\n"
+            "  (section « Personnages présents ici MAINTENANT » plus bas).\n"
+            "- Leur codename va dans `actors_present`. Leur trigger word dans le prompt image.\n"
+        )
+    else:
+        secondary_cast_text = (
+            "## Personnages secondaires (casting à la volée)\n"
+            "L'histoire a besoin de personnages au-delà du casting principal.\n\n"
+            "### OPTION 1 (PRÉFÉRÉE) : Utiliser un acteur du POOL\n"
+            "Si le personnage secondaire est une FEMME, utilise de préférence un acteur "
+            "du pool (section « Personnages disponibles ») — il aura un LoRA dédié et "
+            "sera visuellement cohérent. Pour cela :\n"
+            "- Mets son codename dans `actors_present` (pas dans `secondary_characters`)\n"
+            "- Mets son trigger word dans le prompt image\n"
+            "- Déclare son nom dans `character_names`\n"
+            "- Le LoRA sera automatiquement chargé\n\n"
+            "### OPTION 2 : Créer un personnage sans LoRA\n"
+            "Pour les personnages masculins ou les personnages féminins hors du pool, "
+            "utilise `secondary_characters` avec une description détaillée.\n"
+            "- Invente un **codename stable** (ex: `neighbor_mila`, `friend_jules`)\n"
+            "- Fournis une **description physique détaillée EN ANGLAIS**\n"
+            "- Réutilise **EXACTEMENT** le même codename et description à chaque apparition\n\n"
+            "Pour les hommes, utilise un ancrage par acteur célèbre dans la description "
+            "technique UNIQUEMENT (champ `secondary_characters`, en anglais) :\n"
+            "- 'resembling a young Oscar Isaac, early 30s, olive-toned skin...'\n"
+            "- 'with the build of Idris Elba, tall, deep voice...'\n\n"
+            "⚠️ Ne JAMAIS mentionner le nom d'un acteur célèbre dans la NARRATION. "
+            "L'ancrage est UNIQUEMENT pour le prompt image.\n\n"
+            "### Règles\n"
+            "- Un personnage secondaire peut devenir PRINCIPAL si le joueur le choisit\n"
+            "- Sa description DOIT être identique à chaque apparition (copier-coller)\n"
+            "- Il peut avoir des vêtements différents (mis à jour dans clothing_state)\n"
+            "- N'introduis pas plus de 1-2 nouveaux personnages par séquence"
+        )
 
     # Base secondary-cast instructions are session-stable
     sections.append(secondary_cast_text)
@@ -559,34 +664,41 @@ def build_system_prompt(
         "- Texture : ‘crisp details’, ‘natural film grain’, ‘organic textures’\n"
         "- Ambiance : ‘moody atmosphere’, ‘cinematic color grading’, ‘golden hour warmth’\n"
         "\n"
-        "### Exemples par type de plan\n"
-        "\n"
-        "**Plan de dialogue (personnage proche, regard caméra) :**\n"
-        f"\"{trigger_words[0] if trigger_words else 'TRIGGER'}, POV first-person, eye-level, A candid medium close-up of a 26-year-old woman, "
-        "wavy dark hair, wearing a cream silk blouse. She leans against a marble bar, "
-        "one hand on the counter, the other holding a wine glass, eyes meeting the lens. "
-        "Warm golden key light from vintage sconces. Highly detailed skin texture. "
-        "Shot on 50mm lens, Portra Film Photo, shallow depth of field.\"\n"
-        "\n"
-        "**Plan atmosphérique (lieu sans personnage) :**\n"
-        "\"POV first-person, eye-level, A dimly lit Parisian cocktail lounge seen from a leather barstool. "
-        "Marble counter, half-empty wine glass, rain streaking the window. "
-        "Warm amber light from vintage sconces, neon reflections on wet glass. "
-        "Shot on 35mm lens, Quiet Luxury Photo, deep depth of field, moody atmosphere.\"\n"
-        "\n"
-        "**Plan de situation (personnage vu de loin/de dos) :**\n"
-        f"\"{trigger_words[0] if trigger_words else 'TRIGGER'}, POV first-person, eye-level looking across a busy street, A young woman with dark hair "
-        "seen from behind, walking away through a rain-soaked Parisian sidewalk, "
-        "wearing a dark coat, her figure partially obscured by passing pedestrians. "
-        "Overcast daylight, wet reflections on cobblestones. "
-        "Shot on 35mm lens, candid street photo, deep depth of field, natural film grain.\"\n"
-        "\n"
-        "**Plan détail (objet / gros plan) :**\n"
-        "\"POV first-person, looking down, Extreme close-up of two hands almost touching on a wooden table, "
-        "a folded note between them, condensation on a glass nearby. "
-        "Warm side light from a table candle, soft bokeh background of a restaurant. "
-        "Shot on 85mm macro lens, editorial photography, crisp details.\"\n"
-        "\n"
+        # Worked scene examples — biased toward specific tropes (Parisian cocktail
+        # lounge, folded note, marble bar, etc.). Useful in classic mode for
+        # learning the shot-type structure, but in slice-of-life mode they
+        # actively pull Grok toward those exact scenarios. We skip them in slice mode.
+        + (
+            "### Exemples par type de plan\n"
+            "\n"
+            "**Plan de dialogue (personnage proche, regard caméra) :**\n"
+            f"\"{trigger_words[0] if trigger_words else 'TRIGGER'}, POV first-person, eye-level, A candid medium close-up of a 26-year-old woman, "
+            "wavy dark hair, wearing a cream silk blouse. She leans against a marble bar, "
+            "one hand on the counter, the other holding a wine glass, eyes meeting the lens. "
+            "Warm golden key light from vintage sconces. Highly detailed skin texture. "
+            "Shot on 50mm lens, Portra Film Photo, shallow depth of field.\"\n"
+            "\n"
+            "**Plan atmosphérique (lieu sans personnage) :**\n"
+            "\"POV first-person, eye-level, A dimly lit Parisian cocktail lounge seen from a leather barstool. "
+            "Marble counter, half-empty wine glass, rain streaking the window. "
+            "Warm amber light from vintage sconces, neon reflections on wet glass. "
+            "Shot on 35mm lens, Quiet Luxury Photo, deep depth of field, moody atmosphere.\"\n"
+            "\n"
+            "**Plan de situation (personnage vu de loin/de dos) :**\n"
+            f"\"{trigger_words[0] if trigger_words else 'TRIGGER'}, POV first-person, eye-level looking across a busy street, A young woman with dark hair "
+            "seen from behind, walking away through a rain-soaked Parisian sidewalk, "
+            "wearing a dark coat, her figure partially obscured by passing pedestrians. "
+            "Overcast daylight, wet reflections on cobblestones. "
+            "Shot on 35mm lens, candid street photo, deep depth of field, natural film grain.\"\n"
+            "\n"
+            "**Plan détail (objet / gros plan) :**\n"
+            "\"POV first-person, looking down, Extreme close-up of two hands almost touching on a wooden table, "
+            "a folded note between them, condensation on a glass nearby. "
+            "Warm side light from a table candle, soft bokeh background of a restaurant. "
+            "Shot on 85mm macro lens, editorial photography, crisp details.\"\n"
+            "\n"
+            if world is None else ""
+        ) +
         "### Mots INTERDITS (Z-Image Turbo les génère au lieu de les éviter)\n"
         "Ne JAMAIS écrire : 'selfie', 'phone', 'camera', 'mirror', 'blur',\n"
         "'artifact', 'you', 'your', 'viewer', 'same as before', 'previous'\n"
@@ -796,7 +908,17 @@ def build_system_prompt(
     # ─── Current state (consistency tracker) ──────────────
     if consistency_state and consistency_state.get("location"):
         state_lines = [f"## État actuel (séquence {sequence_number})"]
-        state_lines.append(f"- Lieu actuel : {consistency_state['location']}")
+        # In slice-of-life mode the world location is the canonical source of truth.
+        # The consistency tracker's location is from a previous scene (possibly a
+        # different place) — DO NOT echo it as "Lieu actuel" here, that would
+        # contradict the world block at the top of the dynamic section.
+        if world is None:
+            state_lines.append(f"- Lieu actuel : {consistency_state['location']}")
+        else:
+            state_lines.append(
+                f"- (Décor visuel précédent : {consistency_state['location']} — utile uniquement "
+                f"pour la continuité d'un personnage encore présent ; sinon ignore.)"
+            )
 
         # Separate main cast clothing from secondary characters
         clothing = consistency_state.get("clothing", {})
@@ -839,7 +961,157 @@ def build_system_prompt(
     cast_codes_list = ", ".join(f"`{code}`" for code, _ in cast_actors)
     half = max(1, cast_count // 2)  # how many to introduce in seq 0
 
-    if sequence_number == 0:
+    # ── Slice-of-life mode: location/time-driven context, no forced intro arc ──
+    if world is not None:
+        from world import location_label  # local import to avoid circular dep at module load
+        loc = world.location_by_id(world.current_location)
+        loc_name = loc.name if loc else world.current_location or "?"
+        loc_desc = loc.description if loc else ""
+        loc_type = loc.type if loc else ""
+        slot_fr = {"morning": "matin", "afternoon": "après-midi", "evening": "soir", "night": "nuit"}.get(world.slot, world.slot)
+
+        # Recent visit history — short, helps Grok keep continuity across location-slots
+        history_lines = []
+        for h in (world.history or [])[-6:]:
+            h_loc = world.location_by_id(h.get("location", "")) if h.get("location") else None
+            h_name = h_loc.name if h_loc else h.get("location", "?")
+            h_slot_fr = {"morning": "matin", "afternoon": "après-midi", "evening": "soir", "night": "nuit"}.get(h.get("slot", ""), h.get("slot", ""))
+            history_lines.append(f"- Jour {h.get('day', '?')} · {h_slot_fr} : {h_name}")
+        history_block = "\n".join(history_lines) if history_lines else "- (premier déplacement)"
+
+        # Detect whether the player's last action was an explicit "go elsewhere"
+        # (the UI sends 'Aller ailleurs (carte)' as the choice text). When it is,
+        # we know the player MOVED — characters from the previous scene should NOT
+        # auto-follow.
+        moved_via_map = bool(previous_choice and "ailleurs" in previous_choice.lower())
+
+        slice_intro = (
+            f"## ⌖ LIEU ET MOMENT — RÈGLE PRIORITAIRE\n"
+            f"\n"
+            f"**Jour {world.day} · {slot_fr} · {loc_name}**\n"
+            f"({loc_desc}, type: {loc_type})\n"
+            f"\n"
+            f"⚠️ **MODE SLICE-OF-LIFE ACTIF — overrides priorities** :\n"
+            f"- Toute mention d'« INTRO ARC », « 2 séquences pour présenter le casting » ou similaire "
+            f"dans les sections plus haut est **ANNULÉE**. Ne fais PAS de défilé de personnages.\n"
+            f"- Le décor canonique est ce LIEU et cette HEURE. Toute « État actuel » d'une séquence "
+            f"précédente (autre lieu) est OBSOLÈTE — décris UNIQUEMENT le lieu d'ici, pas l'ancien.\n"
+            f"- Le rythme est libre : plusieurs séquences peuvent enchaîner ici sans rien forcer.\n"
+            f"\n"
+        )
+        # When the player picked a custom setting (pirate, fantasy, sci-fi…), the
+        # location names are still Paris-2026 defaults (home, café, bar). Tell
+        # Grok to rename them in narration to fit the chosen setting, while the
+        # backend keeps the canonical IDs for routing.
+        if custom_setting_text:
+            slice_intro += (
+                f"### Adaptation du lieu au cadre custom\n"
+                f"Le cadre choisi par le joueur est : « {custom_setting_text[:200]} »\n"
+                f"Le LIEU technique ci-dessus (`{loc_name}`, type `{loc_type}`) est un libellé par défaut. "
+                f"DANS LA NARRATION et l'image_prompt, RENOMME ce lieu pour qu'il colle au cadre "
+                f"(ex: pour un cadre pirate, `Le Petit Marais` (cafe) devient `La Sirène Ivre` (taverne) ; "
+                f"`Studio Vinyasa` (gym) devient `arène d'entraînement à l'épée`). "
+                f"Garde la FONCTION du lieu (cafe = lieu social calme, bar = nuit/alcool, gym = effort, etc.) "
+                f"mais habille-le avec le vocabulaire du cadre. Sois cohérent : utilise le MÊME nom "
+                f"adapté à chaque retour à ce lieu.\n"
+                f"\n"
+            )
+        if previous_choice:
+            slice_intro += f"Le joueur vient de choisir : « {previous_choice} »\n\n"
+
+        slice_intro += (
+            f"### Mode 'slice-of-life'\n"
+            f"Tu n'écris PAS un arc d'introduction. Tu décris UNE tranche de vie : ce qui se passe "
+            f"MAINTENANT, ici, pendant les prochaines minutes/heures. Cela peut être :\n"
+            f"- très calme (le joueur seul, ambiance, son téléphone, un café),\n"
+            f"- animé (PNJ qui passent, serveur, inconnu qui demande l'heure),\n"
+            f"- ou — RAREMENT — un face-à-face avec un personnage du casting si sa vie l'amène ici.\n"
+            f"\n"
+        )
+        if moved_via_map:
+            slice_intro += (
+                f"### ⚠️ LE JOUEUR S'EST DÉPLACÉ SEUL\n"
+                f"Le choix précédent était « Aller ailleurs » — le joueur a quitté l'endroit précédent "
+                f"VOLONTAIREMENT et SEUL. Les personnages qui étaient dans la scène d'avant sont restés "
+                f"là où ils étaient. Ils ne suivent PAS le joueur.\n"
+                f"\n"
+                f"NE PAS faire apparaître à {loc_name} un personnage du casting qui était dans la scène "
+                f"précédente, SAUF s'il est crédible que sa vie l'amène ici aussi (ex: ils étaient au café "
+                f"ensemble, le joueur va à la salle de yoga où elle a justement cours après).\n"
+                f"\n"
+                f"Privilégie une scène solo ou avec des PNJ. Ça donne au joueur la sensation de "
+                f"liberté et permet aux retrouvailles d'avoir du sens.\n"
+                f"\n"
+            )
+        # ── Phase 2: deterministic presence resolver output ──
+        # Replace the "infer from each character's life" guidance with the
+        # CONCRETE list of who's actually here right now (resolver result).
+        if character_states:
+            present_block = (
+                "### Personnages présents ici MAINTENANT\n"
+                "(Le résolveur a déjà déterminé cela à partir des emplois du temps des personnages — "
+                "ne réinterprète pas, suis cette liste à la lettre.)\n\n"
+            )
+            if present_characters:
+                for code in present_characters:
+                    cs = character_states.get(code)
+                    if cs:
+                        mood_line = f" · humeur du jour : {cs.today_mood}" if cs.today_mood else ""
+                        intent_line = f" · envies envers le joueur : {cs.intentions_toward_player}" if cs.intentions_toward_player else ""
+                        present_block += (
+                            f"- **{code}** ({cs.personality or 'no profile'}, {cs.job or 'no job'})"
+                            f"{mood_line}{intent_line}\n"
+                        )
+                    else:
+                        present_block += f"- **{code}**\n"
+                present_block += (
+                    "\nUtilise ces personnages dans la scène — c'est CRÉDIBLE qu'ils soient ici. "
+                    "Ne fais PAS apparaître d'autres personnages du casting principal qui ne sont PAS "
+                    "dans cette liste (ils sont ailleurs, leur vie continue).\n"
+                )
+            else:
+                present_block += (
+                    "AUCUN personnage du casting principal n'est ici à cet horaire — "
+                    "leur vie les emmène ailleurs. Cette scène est SOLO ou avec des PNJ secondaires "
+                    "(serveurs, inconnus, voisin qui passe). Fais-en un moment d'atmosphère, "
+                    "d'introspection, ou de rencontre brève avec un PNJ.\n\n"
+                    "⚠️ NE FAIS APPARAÎTRE AUCUN personnage du casting principal dans cette séquence.\n"
+                )
+            slice_intro += present_block + "\n"
+        else:
+            # Fallback: no agent states (early sessions or generation failed)
+            slice_intro += (
+                f"### Qui est présent ?\n"
+                f"Décide en fonction du LIEU + de l'HEURE + de la VIE de chaque personnage du casting "
+                f"(déduite de leur description plus haut).\n"
+                f"\n"
+                f"Si AUCUN personnage du casting ne colle au lieu/heure → fais une scène SANS eux. "
+                f"L'atmosphère seule est valable.\n"
+                f"\n"
+                f"⚠️ Première séquence du jeu : par défaut, le joueur est SEUL chez lui.\n"
+                f"\n"
+                f"Casting potentiel : {cast_codes_list}\n\n"
+            )
+
+        # Trailing block (history + choices guidance) — common to both branches
+        slice_intro += (
+            f"### Récents déplacements du joueur\n"
+            f"{history_block}\n"
+            f"\n"
+            f"### Choix de fin\n"
+            f"4 choix qui découlent NATURELLEMENT de la scène :\n"
+            f"- Plusieurs choix peuvent rester DANS le même lieu (continuer, observer, commander, "
+            f"engager la conversation avec un PNJ ou un personnage du casting présent).\n"
+            f"- Un choix peut impliquer un changement de lieu (« Proposer d'aller ailleurs avec X » "
+            f"si quelqu'un est là, ou « Rentrer dormir »).\n"
+            f"- Un 5ème choix « Aller ailleurs » sera AJOUTÉ par l'interface — n'inclus PAS ce choix toi-même.\n"
+            f"\n"
+            f"⚠️ Mood gating : respecte les relations actuelles (section État des relations). "
+            f"Pas d'intimité explicite avant que la relation soit établie."
+        )
+        sections.append(slice_intro)
+
+    elif sequence_number == 0:
         # ── INTRO ARC PART 1 ──
         # Player moves through ONE coherent setting; characters appear naturally
         sections.append(

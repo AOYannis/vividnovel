@@ -10,6 +10,7 @@ import {
 import type { LoraInfo, ExtraLora } from '../api/types'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import BottomSheet from './layout/BottomSheet'
+import WorldDebugTab from './WorldDebugTab'
 
 interface DebugPanelProps {
   onClose?: () => void
@@ -18,7 +19,7 @@ interface DebugPanelProps {
 export default function DebugPanel({ onClose }: DebugPanelProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const { sessionId, generatedPrompts, allSequenceCosts, sequenceNumber, videoCost, videoGenerationTime, videoStatus, videoPrompt, images, debugContext } = useGameStore()
-  const [tab, setTab] = useState<'prompts' | 'system' | 'memory' | 'loras' | 'video' | 'costs'>('prompts')
+  const [tab, setTab] = useState<'prompts' | 'system' | 'memory' | 'loras' | 'video' | 'costs' | 'world'>('prompts')
   const [memoryData, setMemoryData] = useState<{ persistent_memory: string; narrative_memory: string; mem0_enabled: boolean } | null>(null)
   const [memoryLoading, setMemoryLoading] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState('')
@@ -150,7 +151,7 @@ export default function DebugPanel({ onClose }: DebugPanelProps) {
     <>
       {/* Tabs */}
       <div className="flex overflow-x-auto no-scrollbar whitespace-nowrap border-b border-neutral-800 shrink-0">
-        {(['prompts', 'system', 'memory', 'loras', 'video', 'costs'] as const).map((t) => (
+        {(['prompts', 'system', 'memory', 'loras', 'video', 'costs', 'world'] as const).map((t) => (
           <button
             key={t}
             onClick={() => {
@@ -171,7 +172,7 @@ export default function DebugPanel({ onClose }: DebugPanelProps) {
           >
             {({
               prompts: 'Prompts', system: 'System', memory: 'Mem0',
-              loras: 'LoRA', video: 'Video', costs: 'Costs',
+              loras: 'LoRA', video: 'Video', costs: 'Costs', world: 'World',
             } as const)[t]}
           </button>
         ))}
@@ -926,6 +927,9 @@ export default function DebugPanel({ onClose }: DebugPanelProps) {
             )}
           </div>
         )}
+
+        {/* ── World (slice-of-life) ── */}
+        {tab === 'world' && <WorldDebugTab />}
       </div>
     </>
   )

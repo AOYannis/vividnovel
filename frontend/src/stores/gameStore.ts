@@ -76,6 +76,12 @@ interface GameState {
   allSequenceCosts: SequenceCosts[]
   debugContext: { systemPromptLength: number; persistentMemory: string; narrativeMemory: string; grokModel: string } | null
 
+  // ── Slice-of-life world ──
+  world: import('../api/types').WorldState | null
+  characterStates: Record<string, import('../api/types').CharacterState>
+  knownWhereabouts: import('../api/types').KnownWhereabout[]
+  presenceNow: Record<string, string[]>     // loc_id → [char_codes] for current slot
+
   // ── Actions ──
   setPlayer: (p: PlayerProfile) => void
   setSetting: (s: string) => void
@@ -87,6 +93,8 @@ interface GameState {
   selectChoice: (choice: Choice) => void
   resetForNewSequence: () => void
   setCurrentScene: (scene: number) => void
+  setWorld: (w: import('../api/types').WorldState | null) => void
+  setWorldPayload: (payload: import('../api/types').WorldPayload) => void
   toggleDebug: () => void
   openGallery: (sessionId: string) => void
   openAdmin: () => void
@@ -112,6 +120,10 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   sequenceCosts: null,
   relationships: {},
   currentScene: 0,
+  world: null,
+  characterStates: {},
+  knownWhereabouts: [],
+  presenceNow: {},
 
   sceneChats: {},
   phoneOpen: false,
@@ -470,6 +482,13 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   }),
 
   setCurrentScene: (scene) => set({ currentScene: scene }),
+  setWorld: (w) => set({ world: w }),
+  setWorldPayload: (payload) => set({
+    world: payload.world,
+    characterStates: payload.character_states || {},
+    knownWhereabouts: payload.known_whereabouts || [],
+    presenceNow: payload.presence_now || {},
+  }),
 
   toggleDebug: () => set({ showDebug: !get().showDebug }),
 
@@ -491,6 +510,10 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     isStreaming: false,
     sequenceCosts: null,
     currentScene: 0,
+    world: null,
+    characterStates: {},
+    knownWhereabouts: [],
+    presenceNow: {},
     sceneChats: {},
     phoneOpen: false,
     phoneActiveChar: null,

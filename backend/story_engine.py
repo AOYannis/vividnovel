@@ -169,6 +169,16 @@ class GameSession:
             "video_cost": 0.0,
             "total": 0.0,
         }
+        # Slice-of-life world state — opt-in (None = classic mode with intro arc)
+        from world import WorldState, CharacterState
+        self.world: WorldState | None = None
+        # Per-character agent states (Phase 2). Populated at game start when
+        # slice_of_life=True. dict[codename → CharacterState].
+        self.character_states: dict[str, CharacterState] = {}
+        # Player-known whereabouts (Phase 2B): things the player has been TOLD
+        # about future character locations. Source: dialogue extractor.
+        # Each entry: {char, location_id, day, slot, source}
+        self.known_whereabouts: list[dict] = []
 
 
 class StoryEngine:
@@ -215,6 +225,32 @@ class StoryEngine:
             if hasattr(session, '_custom_actor_override'):
                 self._custom_override = session._custom_actor_override
 
+            # Resolve which characters are present at the current location/slot.
+            # The list is what build_system_prompt uses to inject FULL agent
+            # context only for the relevant characters (vs dumping all bios).
+            present_characters: list[str] = []
+            if session.world and session.character_states:
+                from world import who_is_at
+                present_characters = who_is_at(
+                    session.world.current_location,
+                    session.world.day,
+                    session.world.slot,
+                    session.character_states,
+                )
+                # ── Early-game presence cap ──
+                # Sequence 0 (the very first one): always solo so the player can
+                # breathe and find their bearings before any encounter.
+                # Sequences 1-2: cap at ONE character max — even if the resolver
+                # placed several at the same location, pick the first one only.
+                # Sequence 3+: no cap — the world is fully alive.
+                if session.sequence_number == 0:
+                    if present_characters:
+                        print(f"[slice] Forcing solo first sequence (resolver had {present_characters})")
+                    present_characters = []
+                elif session.sequence_number in (1, 2) and len(present_characters) > 1:
+                    print(f"[slice] Capping early sequence to 1 char (resolver had {present_characters})")
+                    present_characters = present_characters[:1]
+
             # Build system prompt
             system_prompt = session.system_prompt_override or build_system_prompt(
                 player=session.player,
@@ -228,6 +264,9 @@ class StoryEngine:
                 custom_actor_override=getattr(session, '_custom_actor_override', None),
                 language=session.language,
                 relationships=session.relationships,
+                world=session.world,
+                character_states=session.character_states,
+                present_characters=present_characters,
             )
 
             # Mem0 memory recall (session-scoped only — no cross-session contamination)
@@ -923,6 +962,34 @@ class StoryEngine:
             narration_segments = narration_segments[:IMAGES_PER_SEQUENCE]
             while len(narration_segments) < IMAGES_PER_SEQUENCE:
                 narration_segments.append("")
+
+            # ── Phase 2B: extract player-visible whereabouts from this sequence's
+            #    narration. Cheap Grok call (~250+80 tok). Only fires in slice mode
+            #    with character_states populated. Append (deduped) to session.known_whereabouts.
+            if session.world is not None and session.character_states:
+                try:
+                    from agent import extract_whereabouts
+                    full_narr = "\n\n".join(seg for seg in narration_segments if seg)
+                    new_mentions = await extract_whereabouts(
+                        self.grok, full_narr,
+                        list(session.character_states.keys()),
+                        session.world.day, session.world.slot,
+                        session.world.locations,
+                        grok_model=model,
+                    )
+                    # Dedupe: same (char, day, slot, location_id) already present?
+                    seen = {(m["char"], m["day"], m["slot"], m["location_id"]) for m in session.known_whereabouts}
+                    added = 0
+                    for m in new_mentions:
+                        key = (m["char"], m["day"], m["slot"], m["location_id"])
+                        if key not in seen:
+                            session.known_whereabouts.append(m)
+                            seen.add(key)
+                            added += 1
+                    if added:
+                        print(f"[agent] +{added} known whereabouts (total {len(session.known_whereabouts)})")
+                except Exception as e:
+                    print(f"[agent] whereabouts extract failed: {e}")
 
             # Log narration + costs
             log.log_narration(narration_segments)

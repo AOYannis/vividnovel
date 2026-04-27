@@ -48,6 +48,7 @@ export default function SetupPage() {
   const [voiceLanguage, setVoiceLanguage] = useState<string | null>(null)
   const [voiceEnhance, setVoiceEnhance] = useState(true)
   const [voiceStereo, setVoiceStereo] = useState(true)
+  const [sliceOfLife, setSliceOfLife] = useState(false)
 
   // Grok model selection
   const [grokModels, setGrokModels] = useState<GrokModel[]>([])
@@ -182,6 +183,10 @@ export default function SetupPage() {
         data.met_characters || [],
         data.character_names || {},
       )
+      // Slice-of-life: pull the world state if this session has it
+      if (data.world) {
+        store.setWorld(data.world)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resume')
     } finally {
@@ -312,8 +317,13 @@ export default function SetupPage() {
         voice_language: voiceNarration && voiceLanguage ? voiceLanguage : undefined,
         voice_enhance: voiceNarration ? voiceEnhance : undefined,
         voice_stereo: voiceNarration ? voiceStereo : undefined,
+        slice_of_life: sliceOfLife || undefined,
       })
       store.startSession(result.session_id)
+      // Slice-of-life: capture the initial world state from the start_game response
+      if (result.world) {
+        store.setWorld(result.world)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start game')
     } finally {
@@ -1230,6 +1240,20 @@ export default function SetupPage() {
                   </p>
                 </div>
               )}
+
+              {/* ── Slice-of-life mode ── */}
+              <div className="bg-neutral-900 border border-emerald-900/40 rounded-xl px-4 py-3.5 md:py-3">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-medium text-emerald-300">Slice-of-life mode (beta)</div>
+                    <div className="text-[10px] text-neutral-500 mt-0.5">
+                      Free-roam: choose locations on a map, time advances when you move. No forced intro arc — characters appear naturally where you go.
+                    </div>
+                  </div>
+                  <input type="checkbox" checked={sliceOfLife} onChange={(e) => setSliceOfLife(e.target.checked)}
+                    className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 w-4 h-4" />
+                </label>
+              </div>
 
               {/* ── Voice / TTS narration ── */}
               <div className="bg-neutral-900 border border-amber-900/40 rounded-xl px-4 py-3.5 md:py-3 space-y-3">

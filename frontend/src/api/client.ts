@@ -134,6 +134,7 @@ export async function startGame(params: {
   voice_language?: string
   voice_enhance?: boolean
   voice_stereo?: boolean
+  slice_of_life?: boolean
 }) {
   const res = await apiFetch(`/api/game/start`, {
     method: 'POST',
@@ -701,5 +702,29 @@ export async function playgroundAudioVideo(params: {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || 'Audio-to-video failed')
   }
+  return res.json()
+}
+
+// ─── Slice-of-life: World / Map ─────────────────────────────────────────────
+
+export async function goToLocation(params: {
+  session_id: string
+  location_id: string
+  advance_time?: boolean
+}): Promise<import('./types').WorldPayload> {
+  const res = await apiFetch('/api/game/go_to_location', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'go_to_location failed')
+  }
+  return res.json()
+}
+
+export async function fetchWorld(sessionId: string): Promise<import('./types').WorldPayload> {
+  const res = await apiFetch(`/api/game/world?session_id=${encodeURIComponent(sessionId)}`)
+  if (!res.ok) throw new Error('Failed to fetch world')
   return res.json()
 }

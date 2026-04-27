@@ -14,6 +14,8 @@ interface ChoicesPanelProps {
   images: ImageSlot[]
   onRegenVideo?: () => void
   regenVideoLoading?: boolean
+  /** Slice-of-life: when present, render an extra "Aller ailleurs" button that opens the map. */
+  onOpenMap?: () => void
 }
 
 export default function ChoicesPanel({
@@ -28,6 +30,7 @@ export default function ChoicesPanel({
   images,
   onRegenVideo,
   regenVideoLoading = false,
+  onOpenMap,
 }: ChoicesPanelProps) {
   const t = useT()
   const [freeText, setFreeText] = useState('')
@@ -67,6 +70,17 @@ export default function ChoicesPanel({
                   </span>
                 </button>
               ))}
+
+              {/* Slice-of-life: open map / go elsewhere */}
+              {onOpenMap && (
+                <button
+                  onClick={onOpenMap}
+                  className="w-full text-left min-h-[56px] p-4 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 hover:bg-emerald-900/30 transition-all backdrop-blur-sm active:scale-[0.98]"
+                >
+                  <span className="text-emerald-400 font-mono text-xs mr-2 uppercase">⌖</span>
+                  <span className="text-white/90 text-sm leading-relaxed">Aller ailleurs (carte)</span>
+                </button>
+              )}
 
               {/* Free text option */}
               <div className="min-h-[56px] p-4 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm">

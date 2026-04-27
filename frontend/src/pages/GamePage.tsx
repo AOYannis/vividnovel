@@ -8,6 +8,7 @@ import SceneCard from '../components/game/SceneCard'
 import VideoScene from '../components/game/VideoScene'
 import ChoicesPanel from '../components/game/ChoicesPanel'
 import Phone from '../components/game/Phone'
+import MapModal from '../components/game/MapModal'
 
 export default function GamePage() {
   const t = useT()
@@ -16,9 +17,10 @@ export default function GamePage() {
     sequenceCosts, showDebug, toggleDebug, step, currentScene,
     setCurrentScene, resetForNewSequence, selectChoice,
     videoStatus, videoUrl, videoCost, videoPrompt, generatedPrompts, sessionId,
-    reset, activeSegmentIndex, completedSequences,
+    reset, activeSegmentIndex, completedSequences, world,
   } = useGameStore()
   const { startSequence } = useStoryStream()
+  const [mapOpen, setMapOpen] = useState(false)
   const startedRef = useRef(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const sceneRefs = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -43,6 +45,17 @@ export default function GamePage() {
       startSequence()
     }
   }, [])
+
+  // ── Slice-of-life: fetch the full world payload (character states +
+  //    known whereabouts + presence map) once on mount. Falls back silently
+  //    if not in slice mode. The map modal also re-fetches on open. ──
+  const setWorldPayload = useGameStore((s) => s.setWorldPayload)
+  useEffect(() => {
+    if (!sessionId || !world) return
+    import('../api/client').then(({ fetchWorld }) => {
+      fetchWorld(sessionId).then(setWorldPayload).catch(() => {})
+    })
+  }, [sessionId, world?.current_location, world?.day, world?.slot])
 
   // ── On resume: scroll to the bottom (choices / continue) ──
   // Only fires when we MOUNT already in the 'choosing' step (i.e. user reopened the app
@@ -315,6 +328,7 @@ export default function GamePage() {
               images={images}
               onRegenVideo={handleRegenVideo}
               regenVideoLoading={regenVideoLoading}
+              onOpenMap={world ? () => setMapOpen(true) : undefined}
             />
           </div>
         )}
@@ -361,6 +375,18 @@ export default function GamePage() {
           <span className="text-[10px] text-emerald-400/70 font-mono drop-shadow bg-black/40 backdrop-blur-sm rounded-full px-2.5 py-1.5">
             ${sequenceCosts.total_session_cost.toFixed(4)}
           </span>
+        )}
+        {/* World badge + Map button (slice-of-life mode only) */}
+        {world && (
+          <>
+            <button
+              onClick={() => setMapOpen(true)}
+              className="text-[10px] font-mono px-2.5 py-1.5 rounded-full transition-colors backdrop-blur-sm bg-emerald-950/50 text-emerald-300 hover:bg-emerald-900/60 border border-emerald-900/40"
+              title="Carte des lieux"
+            >
+              ⌖ J{world.day} · {{morning: 'matin', afternoon: 'après-midi', evening: 'soir', night: 'nuit'}[world.slot] || world.slot} · {world.locations.find((l) => l.id === world.current_location)?.name || world.current_location}
+            </button>
+          </>
         )}
         {/* Phone button */}
         <button
@@ -457,6 +483,22 @@ export default function GamePage() {
       {/* Debug panel (sidebar on desktop, bottom sheet on mobile) */}
       {showDebug && <DebugPanel onClose={toggleDebug} />}
       <Phone />
+      <MapModal
+        open={mapOpen}
+        onClose={() => setMapOpen(false)}
+        onMoved={(newWorld) => {
+          // After moving to a new location, immediately fire a new sequence
+          // there. resetForNewSequence clears the previous scene's state so the
+          // narration starts fresh.
+          resetForNewSequence()
+          // Synthetic choice text the backend uses to detect a deliberate
+          // free-roam move ("Aller ailleurs"). The slice-of-life prompt branches
+          // on this to enforce alone-by-default at the new destination.
+          const newLoc = newWorld.locations.find((l) => l.id === newWorld.current_location)
+          const moveText = `Aller ailleurs : ${newLoc?.name || newWorld.current_location}`
+          startSequence('move', moveText)
+        }}
+      />
     </div>
   )
 }

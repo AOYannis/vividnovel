@@ -39,6 +39,20 @@ async def save_session(session) -> None:
     if not _client:
         return
     try:
+        # Pack the slice-of-life world state + character agent states into
+        # video_settings under private keys. TODO: promote to dedicated columns
+        # once the Supabase schema can be migrated.
+        video_settings = dict(session.video_settings or {})
+        if getattr(session, "world", None):
+            video_settings["_world_state"] = session.world.as_dict()
+        char_states = getattr(session, "character_states", None) or {}
+        if char_states:
+            video_settings["_character_states"] = {
+                code: state.as_dict() for code, state in char_states.items()
+            }
+        known_wh = getattr(session, "known_whereabouts", None) or []
+        if known_wh:
+            video_settings["_known_whereabouts"] = list(known_wh)
         _client.table("game_sessions").upsert({
             "id": session.id,
             "user_id": session.user_id,
@@ -53,7 +67,7 @@ async def save_session(session) -> None:
             "total_costs": session.total_costs,
             "style_loras": session.style_loras,
             "extra_loras": session.extra_loras,
-            "video_settings": session.video_settings,
+            "video_settings": video_settings,
         }).execute()
     except Exception:
         traceback.print_exc()

@@ -106,6 +106,7 @@ class StartGameRequest(BaseModel):
     voice_language: Optional[str] = None # auto | en | fr | es-ES | ...; None → fall back to game language
     voice_enhance: bool = True           # Pre-enhance narration with Grok before TTS
     voice_stereo: bool = True            # 2-channel output (vs mono)
+    slice_of_life: bool = False          # Enable slice-of-life world (locations + clock + map)
 
 
 class PreviewPromptRequest(BaseModel):
@@ -271,6 +272,49 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
             "description": req.custom_character_desc,
             "prompt_prefix": req.custom_character_desc,
         }
+    # Slice-of-life mode: ONE Grok call generates the location set (themed to
+    # the setting) AND the cast schedules (with strict no-overlap rules + home
+    # off-limits to cast). Falls back to per-setting default locations + parallel
+    # per-character generation if the unified call fails.
+    if req.slice_of_life:
+        from world import default_world_for_setting, WorldState, Location
+        from agent import generate_world_and_agents, generate_all_character_states
+        cast_tuples = [
+            (code, ACTOR_REGISTRY[code]) for code in req.actors
+            if code in ACTOR_REGISTRY and code != "custom"
+        ]
+        if "custom" in req.actors and req.custom_character_desc:
+            cast_tuples.append(
+                ("custom", {"description": req.custom_character_desc, "prompt_prefix": req.custom_character_desc})
+            )
+        setting_label = SETTINGS.get(req.setting, {}).get("label") or req.custom_setting or req.setting
+        try:
+            locs, states = await generate_world_and_agents(
+                grok_client, setting_label, req.custom_setting or "", cast_tuples,
+                grok_model=session.grok_model,
+            )
+            if locs and states:
+                # Build the world with the themed location set
+                session.world = WorldState(
+                    day=1, slot="evening",
+                    locations=locs,
+                    current_location="home",
+                    history=[{"day": 1, "slot": "evening", "location": "home"}],
+                )
+                session.character_states = states
+                print(f"[slice] world+agents built ({len(locs)} locations, {len(states)} agents)")
+            else:
+                # Fallback: canned setting locations + per-character generation
+                session.world = default_world_for_setting(req.setting)
+                session.character_states = await generate_all_character_states(
+                    grok_client, cast_tuples, setting_label, session.world.locations,
+                    grok_model=session.grok_model,
+                )
+                print(f"[slice] FALLBACK: canned locations + {len(session.character_states)} per-char states")
+        except Exception as e:
+            print(f"[slice] generation failed entirely: {e}; defaulting to empty world")
+            session.world = default_world_for_setting(req.setting)
+            session.character_states = {}
     sessions[session_id] = session
 
     # Persist to DB (fire-and-forget)
@@ -287,6 +331,7 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
         "player": req.player.model_dump(),
         "setting": setting_info,
         "cast": cast_info,
+        "world": session.world.as_dict() if session.world else None,
     }
 
 
@@ -311,6 +356,72 @@ async def run_sequence(req: SequenceRequest, user: dict = Depends(get_current_us
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ─── Slice-of-life: World / Map ──────────────────────────────────────────────
+
+class GoToLocationRequest(BaseModel):
+    session_id: str
+    location_id: str
+    advance_time: bool = True   # default behaviour: a move costs one slot
+
+@app.post("/api/game/go_to_location")
+async def go_to_location(req: GoToLocationRequest, user: dict = Depends(get_current_user)):
+    """Switch the player's current location and (by default) advance the clock
+    by one time slot. Returns the updated world state. The frontend then triggers
+    a normal /api/game/sequence call which will be context-aware via the
+    location-and-time block injected into the system prompt."""
+    session = get_user_session(req.session_id, user)
+    if session.world is None:
+        raise HTTPException(400, "This session is not in slice-of-life mode")
+    from world import set_location
+    try:
+        set_location(session.world, req.location_id, advance=req.advance_time)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    # Reset the per-scene consistency décor (location + props) so the next
+    # sequence's image prompts and "État actuel" don't drag the previous
+    # location's setting. We KEEP clothing — players' and characters' outfits
+    # are persistent across moves; Grok will only reference clothing for
+    # characters who are actually present at the new location.
+    session.consistency.location = ""
+    session.consistency.props = []
+    db.fire_and_forget(db.save_session(session))
+    return _build_world_payload(session)
+
+
+def _build_world_payload(session) -> dict:
+    """Common shape returned by both go_to_location and get_world.
+    Includes everything the map UI / debug panel needs:
+      - world: clock + locations + history
+      - character_states: per-character agent state (slim — schedule + personality + job + mood)
+      - known_whereabouts: things the PLAYER has been told
+      - presence_now: {loc_id → [char_codes]} — resolver output for the CURRENT slot
+    Returns {world: None} when slice-of-life is off."""
+    if session.world is None:
+        return {"world": None}
+    from world import who_is_at
+    world = session.world
+    states = session.character_states or {}
+    presence_now: dict[str, list[str]] = {}
+    if states:
+        for loc in world.locations:
+            present = who_is_at(loc.id, world.day, world.slot, states)
+            if present:
+                presence_now[loc.id] = present
+    return {
+        "world": world.as_dict(),
+        "character_states": {code: s.as_dict() for code, s in states.items()},
+        "known_whereabouts": list(session.known_whereabouts or []),
+        "presence_now": presence_now,
+    }
+
+
+@app.get("/api/game/world")
+async def get_world(session_id: str, user: dict = Depends(get_current_user)):
+    """Return the current world state + agent debug info (map / debug panel)."""
+    session = get_user_session(session_id, user)
+    return _build_world_payload(session)
 
 
 # ─── Scene Chat Route ────────────────────────────────────────────────────────
@@ -893,10 +1004,29 @@ async def regen_scene_video(req: RegenSceneVideoRequest, user: dict = Depends(ge
 
 @app.get("/api/debug/system-prompt/{session_id}")
 async def get_system_prompt(session_id: str):
-    """Get the current system prompt for a session."""
+    """Get the current system prompt for a session — must mirror the
+    in-engine path EXACTLY (world, character_states, present_characters,
+    relationships, language, custom_setting, etc.) or the debug view will
+    misleadingly show classic-mode content while the real engine uses slice
+    mode (or vice-versa)."""
     session = sessions.get(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
+
+    # Resolve present characters the same way the engine does
+    present_characters: list[str] = []
+    if session.world and session.character_states:
+        from world import who_is_at
+        present_characters = who_is_at(
+            session.world.current_location,
+            session.world.day,
+            session.world.slot,
+            session.character_states,
+        )
+        if session.sequence_number == 0:
+            present_characters = []
+        elif session.sequence_number in (1, 2) and len(present_characters) > 1:
+            present_characters = present_characters[:1]
 
     current = session.system_prompt_override or build_system_prompt(
         player=session.player,
@@ -904,6 +1034,14 @@ async def get_system_prompt(session_id: str):
         setting_id=session.setting,
         consistency_state=session.consistency.to_dict(),
         sequence_number=session.sequence_number,
+        custom_setting_text=getattr(session, "custom_setting_text", ""),
+        style_moods=session.style_moods,
+        custom_actor_override=getattr(session, "_custom_actor_override", None),
+        language=session.language,
+        relationships=session.relationships,
+        world=session.world,
+        character_states=session.character_states,
+        present_characters=present_characters,
     )
     return {"prompt": current, "is_override": bool(session.system_prompt_override)}
 
@@ -936,12 +1074,33 @@ async def modify_prompt_with_grok(req: PromptModifyRequest):
     if not session:
         raise HTTPException(404, "Session not found")
 
+    # Mirror the engine's build_system_prompt call so slice-of-life mode is
+    # respected when the user asks Grok to modify the prompt.
+    present_characters: list[str] = []
+    if session.world and session.character_states:
+        from world import who_is_at
+        present_characters = who_is_at(
+            session.world.current_location, session.world.day,
+            session.world.slot, session.character_states,
+        )
+        if session.sequence_number == 0:
+            present_characters = []
+        elif session.sequence_number in (1, 2) and len(present_characters) > 1:
+            present_characters = present_characters[:1]
     current = session.system_prompt_override or build_system_prompt(
         player=session.player,
         cast=session.cast,
         setting_id=session.setting,
         consistency_state=session.consistency.to_dict(),
         sequence_number=session.sequence_number,
+        custom_setting_text=getattr(session, "custom_setting_text", ""),
+        style_moods=session.style_moods,
+        custom_actor_override=getattr(session, "_custom_actor_override", None),
+        language=session.language,
+        relationships=session.relationships,
+        world=session.world,
+        character_states=session.character_states,
+        present_characters=present_characters,
     )
 
     async def event_stream():
@@ -1261,7 +1420,11 @@ async def resume_session(session_id: str, user: dict = Depends(get_current_user)
         s = sessions[session_id]
         if s.user_id != user["user_id"]:
             raise HTTPException(403, "Not your session")
-        return {"session_id": session_id, "sequence_number": s.sequence_number}
+        return {
+            "session_id": session_id,
+            "sequence_number": s.sequence_number,
+            "world": s.world.as_dict() if s.world else None,
+        }
 
     # Load from DB
     row = await db.load_session_data(session_id, user["user_id"])
@@ -1285,6 +1448,22 @@ async def resume_session(session_id: str, user: dict = Depends(get_current_user)
     session.extra_loras = row.get("extra_loras", [])
     session.video_settings = row.get("video_settings", {})
     session.total_costs = row.get("total_costs", {})
+    # Restore slice-of-life world state + character agent states if persisted
+    # (live inside video_settings for now — see save_session for the rationale).
+    _world_packed = (session.video_settings or {}).get("_world_state")
+    if _world_packed:
+        from world import WorldState
+        session.world = WorldState.from_dict(_world_packed)
+    _char_states_packed = (session.video_settings or {}).get("_character_states")
+    if _char_states_packed:
+        from world import CharacterState
+        session.character_states = {
+            code: CharacterState.from_dict(data)
+            for code, data in _char_states_packed.items()
+        }
+    _known_wh_packed = (session.video_settings or {}).get("_known_whereabouts") or []
+    if _known_wh_packed:
+        session.known_whereabouts = list(_known_wh_packed)
     # Restore consistency
     cs = row.get("consistency_state", {})
     session.consistency.location = cs.get("location", "")
@@ -1326,6 +1505,7 @@ async def resume_session(session_id: str, user: dict = Depends(get_current_user)
         "cast": session.cast,
         "met_characters": met_characters,
         "character_names": character_names,
+        "world": session.world.as_dict() if session.world else None,
     }
 
 
