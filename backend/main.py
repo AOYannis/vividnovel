@@ -102,10 +102,11 @@ class StartGameRequest(BaseModel):
     custom_character_desc: Optional[str] = None  # description for the "custom" actor
     voice_narration: bool = False        # Generate per-scene TTS audio
     voice_to_video: bool = False         # Use TTS audio as soundtrack of P-Video
-    voice_id: str = "ara"                # ara | eve | leo | rex | sal
+    voice_id: str = "ara"                # ara | eve | leo | rex | sal — fallback dialogue voice
     voice_language: Optional[str] = None # auto | en | fr | es-ES | ...; None → fall back to game language
     voice_enhance: bool = True           # Pre-enhance narration with Grok before TTS
     voice_stereo: bool = True            # 2-channel output (vs mono)
+    narration_voice: str = "sal"         # Voice used for narration prose (vs dialogue)
     slice_of_life: bool = False          # Enable slice-of-life world (locations + clock + map)
 
 
@@ -225,6 +226,23 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
         "actors": req.actors,
         "actor_genders": req.actor_genders or {},  # {code: "female" | "trans"}
     }
+    # Phase B — auto-assign one xAI TTS voice per cast member, cycling through
+    # the female / male pools by gender. Trans treated as female for voicing.
+    # The narrator uses session.video_settings["narration_voice"] (default "sal").
+    _female_pool = ["ara", "eve"]
+    _male_pool = ["leo", "rex"]
+    _genders_map = req.actor_genders or {}
+    _f_i = _m_i = 0
+    actor_voices: dict[str, str] = {}
+    for code in req.actors:
+        gender = (_genders_map.get(code) or "female").lower()
+        if gender == "male":
+            actor_voices[code] = _male_pool[_m_i % len(_male_pool)]
+            _m_i += 1
+        else:
+            actor_voices[code] = _female_pool[_f_i % len(_female_pool)]
+            _f_i += 1
+    cast["actor_voices"] = actor_voices
     session_id = str(uuid.uuid4())
     session = GameSession(
         session_id=session_id,
@@ -266,6 +284,8 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
     session.video_settings["voice_language"] = (req.voice_language or req.language or "fr")
     session.video_settings["voice_enhance"] = req.voice_enhance
     session.video_settings["voice_stereo"] = req.voice_stereo
+    # Narrator voice — fixed default; falls back to dialogue voice if 'sal' is unsupported.
+    session.video_settings["narration_voice"] = (req.narration_voice or "sal")
     # Patch custom character description into ACTOR_REGISTRY for this session
     if req.custom_character_desc:
         session._custom_actor_override = {

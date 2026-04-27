@@ -98,6 +98,67 @@ def extract_dialogue(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
+# Walks the text and returns ordered segments tagged narration vs dialogue.
+# Anything inside «», "", "" is dialogue; the rest is narration prose.
+# Empty / whitespace-only segments are dropped.
+_SEGMENT_RE = __import__("re").compile(r"([«\"“][^»\"”]+[»\"”])")
+
+
+def parse_speech_segments(text: str) -> list[dict]:
+    """Split a scene text into ordered segments for multi-voice TTS.
+
+    Each segment is `{"kind": "narration" | "dialogue", "text": str}`. Dialogue
+    text has the surrounding quotes stripped. Order is preserved so the caller
+    can synthesise each part with its own voice and concatenate.
+    """
+    if not text or not text.strip():
+        return []
+    out: list[dict] = []
+    for chunk in _SEGMENT_RE.split(text):
+        if not chunk:
+            continue
+        if _SEGMENT_RE.fullmatch(chunk):
+            inner = chunk[1:-1].strip()
+            if inner:
+                out.append({"kind": "dialogue", "text": inner})
+        else:
+            stripped = chunk.strip()
+            if stripped:
+                out.append({"kind": "narration", "text": stripped})
+    return out
+
+
+def concat_audio_chunks(chunks: list[bytes], output_format: str = "MP3") -> bytes:
+    """Concatenate raw audio bytes. For MP3, naive frame concat works in browsers
+    when all chunks share the same encoder settings (xAI TTS does). For WAV we
+    keep the first header and skip subsequent ones (44-byte RIFF). For anything
+    else we fall back to naive concat — caller's responsibility to keep formats
+    consistent across chunks.
+    """
+    if not chunks:
+        return b""
+    if len(chunks) == 1:
+        return chunks[0]
+    fmt = (output_format or "MP3").upper()
+    if fmt == "WAV":
+        # Keep the first 44-byte RIFF header, strip headers off subsequent chunks,
+        # then patch the data-size + RIFF-size in the first header. xAI returns
+        # standard WAV with a 44-byte header; we don't need to handle the LIST chunk.
+        first = chunks[0]
+        body = b"".join(c[44:] if len(c) > 44 else c for c in chunks)
+        # Patch sizes
+        import struct
+        new_data_size = len(first) - 44 + len(body) - (len(chunks[0]) - 44)
+        new_data_size = sum(len(c) - 44 for c in chunks)
+        new_riff_size = 36 + new_data_size
+        header = bytearray(first[:44])
+        struct.pack_into("<I", header, 4, new_riff_size)
+        struct.pack_into("<I", header, 40, new_data_size)
+        return bytes(header) + body
+    # MP3 (and fallback) — naive byte concat. Browsers handle multi-stream MP3.
+    return b"".join(chunks)
+
+
 import re as _re
 
 

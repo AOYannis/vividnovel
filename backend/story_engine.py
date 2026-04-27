@@ -824,6 +824,8 @@ class StoryEngine:
                                 v_to_video = session.video_settings.get("voice_to_video", False) if session else False
                                 v_backend = session.video_settings.get("video_backend", "pvideo") if session else "pvideo"
                                 v_start_scene = session.video_settings.get("video_start_scene", 0) if session else 0
+                                v_narration_voice = session.video_settings.get("narration_voice", "sal") if session else "sal"
+                                v_actor_voices = (session.cast or {}).get("actor_voices", {}) if session else {}
                                 # Same logic as _emit_image_result for dialogue-only / for_video_only:
                                 # only when this scene will actually get a P-Video that uses our audio.
                                 will_have_video = (v_backend == "pvideo") and (image_index >= v_start_scene)
@@ -840,6 +842,9 @@ class StoryEngine:
                                         for_video_only=use_dialogue_only,
                                         stereo=v_stereo,
                                         log_ref=log,
+                                        narration_voice=v_narration_voice,
+                                        actor_voices=v_actor_voices,
+                                        actors_present=actors_present,
                                     )
 
                             scene_actors[image_index] = list(args.get("actors_present", []) or [])
@@ -1910,14 +1915,22 @@ class StoryEngine:
         for_video_only: bool = False,
         stereo: bool = True,
         log_ref: 'SequenceLogger | None' = None,
+        narration_voice: str | None = None,
+        actor_voices: dict[str, str] | None = None,
+        actors_present: list[str] | None = None,
     ) -> str:
         """Generate TTS for a scene's narration, emit scene_audio_ready, return audio URL.
         - dialogue_only: extract only quoted dialogue from the narration before TTS
           (used when feeding the audio into video lip-sync — narration prose isn't spoken).
-        - for_video_only: tell the UI not to play this clip standalone (it lives in the video)."""
+        - for_video_only: tell the UI not to play this clip standalone (it lives in the video).
+        - When NOT dialogue_only AND a narration_voice is provided, the narration prose
+          and the dialogue lines are voiced separately and stitched together so each part
+          gets its own voice (Phase A multi-voice TTS).
+        """
         from tts import (
             enhance_speech_text, generate_speech, extract_dialogue,
             generate_speech_direct_xai, select_speech_backend,
+            parse_speech_segments, concat_audio_chunks,
         )
         audio_url = ""
         try:
@@ -1947,28 +1960,95 @@ class StoryEngine:
                         self.grok, text, voice=voice, language=language,
                         grok_model=GROK_MODEL,
                     )
-                    # Accumulate enhance Grok usage on the engine for cost roll-up
                     self._tts_enhance_input_tokens += enhance_usage.get("input_tokens", 0)
                     self._tts_enhance_output_tokens += enhance_usage.get("output_tokens", 0)
                     self._tts_enhance_cached_tokens += enhance_usage.get("cached_tokens", 0)
                 except Exception as e:
                     print(f"[tts] Scene {scene_index}: enhance failed — {e}, falling back to raw text")
                     spoken = text
-            mode_tag = "dialogue" if dialogue_only else "narration"
+
+            # ── Phase A: multi-voice synthesis ───────────────────────────────
+            # Decide whether to split narration vs dialogue. Only do it when:
+            #   - we're not in dialogue_only mode (P-Video lip-sync needs ONE voice),
+            #   - we're not piping into a video (for_video_only is False),
+            #   - a distinct narration_voice was configured.
+            multi_voice_eligible = (
+                not dialogue_only
+                and not for_video_only
+                and bool(narration_voice)
+            )
+            segments: list[tuple[str, str]] = []  # [(text, voice_to_use), ...]
+            if multi_voice_eligible:
+                parsed = parse_speech_segments(spoken)
+                if any(s["kind"] == "dialogue" for s in parsed) and any(s["kind"] == "narration" for s in parsed):
+                    # Pick speaker voice for dialogue. Phase B leaves us per-actor
+                    # voices keyed by codename. With a single actor in scene → use
+                    # their voice. With multiple → use the first one (good enough
+                    # for Phase A; smart attribution comes later).
+                    av = actor_voices or {}
+                    speaker_voice = voice  # default
+                    if actors_present:
+                        for code in actors_present:
+                            if code in av:
+                                speaker_voice = av[code]
+                                break
+                    for s in parsed:
+                        v = narration_voice if s["kind"] == "narration" else speaker_voice
+                        segments.append((s["text"], v))
+
+            # ── Synthesis path ───────────────────────────────────────────────
             backend = select_speech_backend(prefer_url=for_video_only, stereo=stereo)
-            print(f"[tts] Scene {scene_index} (seq {sequence_number}): generating {mode_tag} via {backend} {voice}/{language} ({len(spoken)}c, enhance={enhance_elapsed}s)...")
-            if backend == "xai":
+            mode_tag = "dialogue" if dialogue_only else ("narration+dialogue" if segments else "narration")
+
+            if segments:
+                # Multi-voice path. Generate each segment in parallel via xAI direct
+                # (raw bytes), then naive-concat MP3. Skip Runware entirely — we
+                # don't need a hosted URL because for_video_only is False here.
                 from config import XAI_API_KEY
-                res = await generate_speech_direct_xai(
-                    XAI_API_KEY, spoken,
-                    voice=voice, language=language,
-                )
+                print(f"[tts] Scene {scene_index} (seq {sequence_number}): multi-voice {len(segments)} segments "
+                      f"({language}, enhance={enhance_elapsed}s)...")
+                gather = await asyncio.gather(*[
+                    generate_speech_direct_xai(XAI_API_KEY, seg_text, voice=seg_voice, language=language)
+                    for seg_text, seg_voice in segments
+                ], return_exceptions=False)
+                # Decode each base64 data URI back to raw bytes for concat
+                import base64 as _b64
+                raw_chunks: list[bytes] = []
+                total_cost = 0.0
+                total_elapsed = 0.0
+                for r in gather:
+                    data_uri = r.get("audio_data") or ""
+                    if "," in data_uri:
+                        raw_chunks.append(_b64.b64decode(data_uri.split(",", 1)[1]))
+                    total_cost += float(r.get("cost", 0) or 0)
+                    total_elapsed = max(total_elapsed, float(r.get("elapsed", 0) or 0))
+                merged = concat_audio_chunks(raw_chunks, output_format="MP3")
+                merged_b64 = _b64.b64encode(merged).decode()
+                res = {
+                    "audio_url": "",
+                    "audio_data": f"data:audio/mpeg;base64,{merged_b64}",
+                    "voice": f"{narration_voice}+dlg",
+                    "language": language,
+                    "char_count": sum(r.get("char_count", 0) for r in gather),
+                    "cost": total_cost,
+                    "elapsed": round(total_elapsed, 2),
+                    "backend": "xai-multi",
+                }
             else:
-                res = await generate_speech(
-                    self.runware, spoken,
-                    voice=voice, language=language,
-                    channels=2 if stereo else 1,
-                )
+                print(f"[tts] Scene {scene_index} (seq {sequence_number}): generating {mode_tag} via {backend} {voice}/{language} ({len(spoken)}c, enhance={enhance_elapsed}s)...")
+                if backend == "xai":
+                    from config import XAI_API_KEY
+                    res = await generate_speech_direct_xai(
+                        XAI_API_KEY, spoken,
+                        voice=voice, language=language,
+                    )
+                else:
+                    res = await generate_speech(
+                        self.runware, spoken,
+                        voice=voice, language=language,
+                        channels=2 if stereo else 1,
+                    )
+
             audio_url = res.get("audio_url", "") or ""
             tts_audio_cost = float(res.get("cost", 0) or 0)
             self._tts_audio_cost_total += tts_audio_cost
@@ -1986,7 +2066,7 @@ class StoryEngine:
                 "sequence_number": sequence_number,
                 "url": audio_url,
                 "audio_data": res.get("audio_data"),
-                "voice": voice,
+                "voice": res.get("voice", voice),
                 "language": language,
                 "char_count": res.get("char_count", 0),
                 "cost": res.get("cost", 0),
@@ -2028,6 +2108,9 @@ class StoryEngine:
         for_video_only: bool = False,
         stereo: bool = True,
         log_ref: 'SequenceLogger | None' = None,
+        narration_voice: str | None = None,
+        actor_voices: dict[str, str] | None = None,
+        actors_present: list[str] | None = None,
     ) -> asyncio.Task:
         """Launch a TTS task for the given scene's narration. Returns the task so the
         caller can await the audio URL (e.g. for voice-to-video chaining)."""
@@ -2040,6 +2123,9 @@ class StoryEngine:
             voice, language, enhance, session_id,
             dialogue_only=dialogue_only, for_video_only=for_video_only,
             stereo=stereo, log_ref=log_ref,
+            narration_voice=narration_voice,
+            actor_voices=actor_voices,
+            actors_present=actors_present,
         ))
         StoryEngine._tts_tasks.append(task)
         return task
