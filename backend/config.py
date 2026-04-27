@@ -146,7 +146,7 @@ ACTOR_REGISTRY = {
         "lora_id": "warmline:202604260002@1",
         "trigger_word": "nesra",
         "default_weight": 0.8,
-        "description": "European-Asian mix, layered curly hair, freckles, hazel-green eyes",
+        "description": "European-Asian mix, layered curly hair, freckles, hazel-green eyes, always dressed very sexy",
     },
     "ciri": {
         "display_name": "Ciri (Witcher)",
@@ -571,7 +571,7 @@ DEFAULT_STYLE_MOODS = {
             "Le LoRA du personnage est réduit à 0.6 pour laisser Mishra dominer la pose."
         ),
         "lora": {"id": "warmline:202604260001@1", "name": "Mishra v5", "weight": 0.9},
-        "char_lora_weight": 0.6,   # override actor's default_weight for this mood
+        "char_lora_weight": 0.7,   # override actor's default_weight for this mood
         "skip_trans_lora": True,   # do NOT auto-add ZTurbo Pen V3 even for trans actors
         "prompt_block": (
             "mishra, Anal missionary POV with a shemale. "
