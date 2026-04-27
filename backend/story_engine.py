@@ -523,7 +523,8 @@ class StoryEngine:
                                 _intimate_moods = {"explicit_mystic", "blowjob", "blowjob_closeup", "cunnilingus",
                                                    "cunnilingus_from_behind", "missionary", "cowgirl",
                                                    "reverse_cowgirl", "doggystyle", "spooning", "standing_sex",
-                                                   "anal_doggystyle", "anal_missionary", "cumshot_face", "titjob", "handjob"}
+                                                   "anal_doggystyle", "anal_missionary", "anal_missionary_shemale",
+                                                   "cumshot_face", "titjob", "handjob"}
                                 if any(m in _intimate_moods for m in scene_moods):
                                     rel["intimate_scenes"] += 1
                                     rel["level"] = max(rel["level"], 4)
@@ -1029,6 +1030,18 @@ class StoryEngine:
         # naturally in the prompt body where they're described — prepending all trigger
         # words at the start causes Z-Image to blend the LoRA influences and both
         # characters end up looking alike.
+
+        # Allow active moods to override the actor's default LoRA weight
+        # (e.g. anal_missionary_shemale reduces character LoRA to 0.6 so the
+        # specialised pose LoRA can dominate). First mood with the override wins.
+        moods_config_for_char = getattr(self, '_session_moods', None) or DEFAULT_STYLE_MOODS
+        char_lora_weight_override: float | None = None
+        for _mood_name in active_moods:
+            _md = moods_config_for_char.get(_mood_name)
+            if _md and _md.get("char_lora_weight") is not None:
+                char_lora_weight_override = float(_md["char_lora_weight"])
+                break
+
         is_first_actor = True
         for actor_code in actors:
             actor = ACTOR_REGISTRY.get(actor_code)
@@ -1048,7 +1061,7 @@ class StoryEngine:
                 if tw_present or is_first_actor:
                     character_loras.append(ILora(
                         model=actor["lora_id"],
-                        weight=actor["default_weight"],
+                        weight=char_lora_weight_override if char_lora_weight_override is not None else actor["default_weight"],
                     ))
                     if tw and tw not in prompt and is_first_actor:
                         prompt = f"{tw}, {prompt}"
@@ -1113,7 +1126,7 @@ class StoryEngine:
             "cunnilingus", "cunnilingus_from_behind",
             "missionary", "cowgirl", "reverse_cowgirl",
             "spooning", "standing_sex",
-            "anal_doggystyle", "anal_missionary",
+            "anal_doggystyle", "anal_missionary", "anal_missionary_shemale",
             "cumshot_face", "titjob", "handjob",
             # Note: "doggystyle" is intentionally excluded — ZTurbo Pen V3 + dgz LoRA
             # produces bad results. The agent should describe the trans anatomy via the
@@ -1123,9 +1136,16 @@ class StoryEngine:
         trans_actor_present = any(
             actor_genders.get(code) == "trans" for code in actors
         )
+        # If any active mood opts out of the auto trans LoRA stack (e.g. it provides its
+        # own specialised LoRA like Mishra), skip ZTurbo Pen V3 but keep the prompt
+        # fragment so the agent's anatomy description still applies.
+        skip_trans_lora_mood = any(
+            (moods_config.get(m) or {}).get("skip_trans_lora") for m in active_moods
+        )
         if trans_actor_present and any(m in _intimate_moods for m in active_moods):
-            # Add the anatomical detail LoRA (ZTurbo Pen V3)
-            mood_loras.append(ILora(model="warmline:202603170004@1", weight=1.0))
+            if not skip_trans_lora_mood:
+                # Add the anatomical detail LoRA (ZTurbo Pen V3)
+                mood_loras.append(ILora(model="warmline:202603170004@1", weight=1.0))
             # Inject trans description into the prompt (after trigger word, before scene details)
             trans_fragment = "trans woman with erect penis visible, anatomical detail, futa anatomy"
             if trans_fragment[:30].lower() not in prompt.lower():

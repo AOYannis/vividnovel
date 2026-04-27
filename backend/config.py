@@ -562,6 +562,35 @@ DEFAULT_STYLE_MOODS = {
         "cfg": 0,
         "steps": 14,
     },
+    "anal_missionary_shemale": {
+        "description": (
+            "Anal missionnaire POV avec une shemale — variante d'anal_missionary "
+            "spécialisée pour les personnages trans, pénis érigé visible. Utilise le "
+            "LoRA Mishra (spécialisé pose POV missionnaire) à la place du LoRA Mystic. "
+            "NE PAS empiler avec `futa_shemale` — Mishra fournit déjà la pose et l'anatomie. "
+            "Le LoRA du personnage est réduit à 0.6 pour laisser Mishra dominer la pose."
+        ),
+        "lora": {"id": "warmline:202604260001@1", "name": "Mishra v5", "weight": 0.9},
+        "char_lora_weight": 0.6,   # override actor's default_weight for this mood
+        "skip_trans_lora": True,   # do NOT auto-add ZTurbo Pen V3 even for trans actors
+        "prompt_block": (
+            "mishra, Anal missionary POV with a shemale. "
+            "POV close-up looking down at a trans woman lying on her back on a white bed, "
+            "legs spread and raised, her erect penis prominently visible on her belly, "
+            "POV first-person male penetrating her anally, "
+            "her hands gripping the sheets, slightly open mouth with a hint of pleasure, "
+            "natural skin tones, photorealistic anatomy, anatomical detail, "
+            "highly detailed skin texture with subtle pores, warm intimate bedside lamp lighting, "
+            "Shot on 50mm lens, Portra Film Photo, shallow depth of field, cinematic color grading, crisp details"
+        ),
+        "example": (
+            "POV looking down: shemale on her back, legs raised and spread, "
+            "her erect penis visible on her belly, anal penetration POV, "
+            "white sheets, warm intimate light"
+        ),
+        "cfg": 1,
+        "steps": 18,
+    },
     "futa_shemale": {
         "description": (
             "Futa / shemale RÉVÉLATION ANATOMIQUE — UNIQUEMENT pour les scènes où le personnage "

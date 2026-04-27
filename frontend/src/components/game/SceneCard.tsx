@@ -211,16 +211,34 @@ export default function SceneCard({
       a.currentTime = 0
       audioStartedRef.current = true
     }
-    // Try to play unconditionally — the user may have already gestured on the
-    // page (e.g. clicking "Start Game") even if we haven't seen our own gesture
-    // event yet. If autoplay policy blocks it, we'll get an error, fall back to
-    // muted, and try again once the global gesture listener fires.
-    a.play()
-      .then(() => globalUnlockAudio())
-      .catch(() => {
-        a.muted = true
-        a.play().catch(() => {})
-      })
+
+    let cancelled = false
+    const tryPlay = (attempt: number) => {
+      if (cancelled) return
+      a.play()
+        .then(() => globalUnlockAudio())
+        .catch((err: any) => {
+          if (cancelled) return
+          // NotAllowedError = autoplay policy block → mute fallback is the right answer.
+          // Anything else (commonly "the element has no supported sources" or aborted
+          // because the audio bytes/data URI haven't been decoded yet) → DO NOT mute,
+          // wait for `canplay` and retry unmuted. Muting here was the bug that made
+          // some scenes "play" silently and seem to have no audio.
+          if (err && err.name === 'NotAllowedError') {
+            a.muted = true
+            a.play().catch(() => {})
+            return
+          }
+          if (attempt >= 1) return  // already retried once
+          const onCanPlay = () => {
+            a.removeEventListener('canplay', onCanPlay)
+            tryPlay(attempt + 1)
+          }
+          a.addEventListener('canplay', onCanPlay, { once: true })
+        })
+    }
+    tryPlay(0)
+    return () => { cancelled = true }
   }, [isViewing, audioReady, playStandaloneAudio])
 
   // Subscribe to global audio unlock
