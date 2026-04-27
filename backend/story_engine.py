@@ -620,11 +620,18 @@ class StoryEngine:
 
                             # Phase 3D follow-up: server-side presence gate (slice mode).
                             # Strips cast members the resolver did NOT place at the current
-                            # location/slot. Pool actors and unknown codenames pass through.
+                            # location/slot. In SOLO mode (no allowed cast at all) we extend
+                            # the strip set to ALL ACTOR_REGISTRY entries — otherwise pool
+                            # actors slip through (Grok will guess a codename like 'nesra'
+                            # and the LoRA loads coincidentally).
                             slice_enforce = session.world is not None
+                            if slice_enforce and not present_characters:
+                                _gated = list(ACTOR_REGISTRY.keys())
+                            else:
+                                _gated = session.cast.get("actors", []) or []
                             actors_present, gate_removed = gate_presence(
                                 requested_actors,
-                                cast_codes=session.cast.get("actors", []) or [],
+                                cast_codes=_gated,
                                 allowed_cast=present_characters if slice_enforce else None,
                                 enforce=slice_enforce,
                             )
@@ -674,6 +681,15 @@ class StoryEngine:
                                 or ""
                             )
 
+                            # Clothing: merge consistency tracker (locked outfits from
+                            # earlier scenes) with this scene's args (narrator may have
+                            # declared a change). args wins per-actor — so a deliberate
+                            # outfit change overrides the lock.
+                            merged_clothing: dict[str, str] = dict(session.consistency.clothing or {})
+                            for _ac, _cl in (args.get("clothing_state") or {}).items():
+                                if _cl:
+                                    merged_clothing[_ac] = _cl
+
                             crafted_prompt, craft_elapsed = await craft_image_prompt(
                                 self.grok,
                                 scene_index=image_index,
@@ -686,6 +702,7 @@ class StoryEngine:
                                 setting_label=setting_label,
                                 custom_setting_text=session.custom_setting_text or "",
                                 location_hint=location_hint,
+                                clothing_state=merged_clothing,
                                 language=session.language or "fr",
                                 player_gender=(session.player or {}).get("gender", "male"),
                                 grok_model=session.grok_model,
@@ -893,9 +910,11 @@ class StoryEngine:
                             })
 
                 elif finish_reason == "stop":
-                    # Grok ended a turn with text but no tool call. If we haven't fired any
-                    # image yet, this is the "story never starts" failure — log it loudly
-                    # and surface to the client instead of silently completing the sequence.
+                    # Grok ended a turn with text but no tool call. Two cases:
+                    #   - images_generated == 0: never started → bail with error.
+                    #   - images_generated < IMAGES_PER_SEQUENCE: stopped mid-sequence.
+                    #     This happens with very lean prompts (slice solo) where the model
+                    #     decides it's done early. Nudge it to keep going.
                     print(f"[engine] WARNING: finish_reason=stop on round {round_num} with "
                           f"{images_generated} images so far, content_acc len={len(content_acc)}")
                     log.log_error(
@@ -909,6 +928,32 @@ class StoryEngine:
                             "message": "Grok produced narration but didn't call generate_scene_image. "
                                        "This usually self-resolves on retry — please start the sequence again.",
                         })
+                        break
+                    if not choices_provided and images_generated < IMAGES_PER_SEQUENCE:
+                        # Mid-sequence early stop — push a synthetic user message asking
+                        # for the next scene and continue the loop.
+                        next_idx = images_generated
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"La séquence n'est pas terminée. Il reste "
+                                f"{IMAGES_PER_SEQUENCE - images_generated} scène(s) à écrire "
+                                f"(prochaine = scène {next_idx}). Écris 1-2 phrases courtes, "
+                                f"puis appelle generate_scene_image avec image_index={next_idx}. "
+                                f"Continue dans le même lieu et la même ambiance."
+                            ),
+                        })
+                        continue
+                    if images_generated >= IMAGES_PER_SEQUENCE and not choices_provided:
+                        # All images done but Grok forgot provide_choices — nudge.
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"Toutes les {IMAGES_PER_SEQUENCE} scènes sont générées. "
+                                f"Appelle maintenant provide_choices avec exactement 4 choix."
+                            ),
+                        })
+                        continue
                     break
                 elif finish_reason and finish_reason not in ("tool_calls",):
                     # Anything other than stop/tool_calls (e.g. "length", "content_filter") —

@@ -686,6 +686,92 @@ def _slice_sequence_context(
     return out
 
 
+def _build_slice_solo_prompt(
+    *,
+    player: dict,
+    setting_id: str,
+    sequence_number: int,
+    previous_choice: str | None,
+    custom_instructions: str,
+    custom_setting_text: str,
+    style_moods: dict | None,
+    language: str,
+    world,
+) -> str:
+    """SOLO slice prompt — no cast section, no pool, no relationship state.
+
+    Fires whenever the resolver places nobody from the cast at the current
+    location/slot. The narrator literally doesn't see the cast exists, so it
+    can't drift into "introduce the barmaid" — only transient PNJs are possible.
+    Used for sequence 0 (always solo by cap) and any later quiet beat.
+    """
+    lang_config = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES["fr"])
+    setting = SETTINGS.get(setting_id)
+    loc = world.location_by_id(world.current_location)
+    loc_name = loc.name if loc else world.current_location or "?"
+    loc_desc = loc.description if loc else ""
+    loc_type = loc.type if loc else ""
+    slot_fr = {"morning": "matin", "afternoon": "après-midi", "evening": "soir", "night": "nuit"}.get(world.slot, world.slot)
+
+    sections: list[str] = []
+    sections.append(_section_role())
+
+    # Location anchor — very prominent, RIGHT after role
+    sections.append(
+        f"## ⌖ TU ES ICI, MAINTENANT — RÈGLE PRIORITAIRE\n"
+        f"\n"
+        f"**Jour {world.day} · {slot_fr} · {loc_name}**\n"
+        f"({loc_desc}, type: {loc_type})\n"
+        f"\n"
+        f"⚠️ Le joueur est SEUL ici à cette heure. AUCUN personnage de son entourage n'est présent.\n"
+        f"Cette séquence est CALME, INTROSPECTIVE, ATMOSPHÉRIQUE — une vraie tranche de quotidien.\n"
+        f"\n"
+        f"Décris ce que le joueur voit / entend / fait dans CE LIEU précis. Pas de bar, pas de\n"
+        f"taverne, pas de speakeasy : le lieu canonique est `{loc_name}` ({loc_type}). Si tu te\n"
+        f"retrouves à écrire un autre type de lieu, c'est une ERREUR — tu dois rester ICI.\n"
+        f"\n"
+        f"Tu peux faire passer des PNJ TRANSITOIRES (un voisin, le facteur, un message sur le téléphone,\n"
+        f"un appel, une silhouette à la fenêtre) — UNE scène, sans nom récurrent.\n"
+        f"N'INVENTE PAS de personnages avec un nom et un retour : il n'y en a pas dans cette séquence."
+    )
+
+    _push(sections, _section_language(lang_config, language))
+    sections.append(_section_originality())
+    sections.append(_section_execution_flow())
+    sections.append(_section_narration_rules(lang_config))
+    sections.append(_section_memory_guidelines())
+    sections.append(_section_player(player))
+    sections.append(_section_setting(setting, custom_setting_text))
+
+    if custom_setting_text:
+        sections.append(
+            f"## Cadre choisi par le joueur\n"
+            f"« {custom_setting_text[:200]} »\n"
+            f"Le NOM du lieu (`{loc_name}`) est déjà adapté à ce cadre — utilise-le tel quel. "
+            f"NE LE REMPLACE PAS par un autre lieu de l'univers."
+        )
+
+    sections.append(_section_image_handoff())
+    sections.append(_section_mood_enum(style_moods))
+    sections.append(_section_davinci_dialogue(lang_config))
+    sections.append(_section_video_clip(player))
+    sections.append(_section_consistency_rules())
+
+    if previous_choice:
+        sections.append(f"## Choix précédent\nLe joueur vient de choisir : « {previous_choice} »")
+
+    sections.append(
+        f"## Choix de fin (4 obligatoires)\n"
+        f"4 choix qui découlent NATURELLEMENT de la scène. Plusieurs peuvent rester ICI.\n"
+        f"Un 5ème choix « Aller ailleurs » est AJOUTÉ par l'interface — ne l'inclus pas."
+    )
+
+    _push(sections, _section_custom_instructions(custom_instructions))
+    _push(sections, _section_final_language_reminder(lang_config, language))
+
+    return "\n\n".join(sections)
+
+
 def _build_slice_prompt(
     *,
     player: dict,
@@ -704,6 +790,16 @@ def _build_slice_prompt(
     character_states: dict | None,
     present_characters: list[str] | None,
 ) -> str:
+    # Solo branch: when the resolver places nobody, the narrator gets a
+    # MUCH leaner prompt with no cast / pool / relationship state at all.
+    # That's the only reliable way to keep Grok from inventing characters.
+    if not present_characters:
+        return _build_slice_solo_prompt(
+            player=player, setting_id=setting_id, sequence_number=sequence_number,
+            previous_choice=previous_choice, custom_instructions=custom_instructions,
+            custom_setting_text=custom_setting_text, style_moods=style_moods,
+            language=language, world=world,
+        )
     lang_config = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES["fr"])
     setting = SETTINGS.get(setting_id)
     cast_codes_list = ", ".join(f"`{code}`" for code, _ in cast_actors)

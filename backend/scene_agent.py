@@ -60,6 +60,14 @@ Layer 4 — Camera & film: lens (`50mm`, `85mm`, `35mm`), photo style
 - `highly detailed skin texture`, `subtle skin pores`, `natural skin tones`.
 - Optional: `faint freckles`, `sun-kissed skin`, `natural film grain`, `crisp details`.
 
+# Clothing continuity — CRITICAL
+If a "Locked clothing" block is provided, copy each character's outfit VERBATIM into
+the prompt — same garment, same colour, same materials. Never swap a color A dress for
+a color B one between scenes. The only exception is when the scene_summary explicitly
+says the character changed clothes ("she takes off the corset", "she puts on a coat").
+If no locked clothing is provided yet (first time the character is on screen), invent
+an outfit that fits the setting and the character.
+
 # Trigger words (LoRA tokens)
 - If a TRIGGER word is provided for a character, place it AT THE VERY START of the prompt,
   followed by a comma — Z-Image weights prompt prefixes more heavily and the LoRA needs
@@ -122,6 +130,25 @@ def _format_actor_block(actors_present: list[str], actor_lookup: dict[str, dict]
     return "\n".join(lines)
 
 
+def _format_clothing_block(actors_present: list[str], clothing_state: dict[str, str]) -> str:
+    """Per-actor clothing description (locked across scenes by the consistency
+    tracker). The specialist MUST honour these outfits verbatim — no swapping,
+    no recolouring — unless the narrator says the character changed clothes.
+    """
+    if not clothing_state:
+        return ""
+    relevant = {code: clothing_state[code] for code in actors_present if code in clothing_state}
+    extra = {code: clothing_state[code] for code in clothing_state if code not in actors_present}
+    if not relevant and not extra:
+        return ""
+    lines = ["Locked clothing (use VERBATIM — same colour, same materials, same items as the previous scene):"]
+    for code, clothing in relevant.items():
+        lines.append(f"- `{code}`: {clothing}")
+    for code, clothing in extra.items():
+        lines.append(f"- (`{code}`, not visible this scene but locked for continuity): {clothing}")
+    return "\n".join(lines)
+
+
 def _format_mood_block(mood_name: str | None, mood_data: dict | None) -> str:
     if not mood_name or mood_name == "neutral":
         return "Mood: `neutral` — no special framing or LoRA. Compose the shot freely."
@@ -151,6 +178,7 @@ async def craft_image_prompt(
     setting_label: str,
     custom_setting_text: str,
     location_hint: str,
+    clothing_state: dict[str, str] | None,
     language: str,
     player_gender: str,
     grok_model: str = "grok-4-1-fast-non-reasoning",
@@ -162,6 +190,7 @@ async def craft_image_prompt(
     """
     actor_block = _format_actor_block(actors_present, actor_lookup)
     mood_block = _format_mood_block(mood_name, mood_data)
+    clothing_block = _format_clothing_block(actors_present, clothing_state or {})
 
     setting_line = setting_label or "(unspecified setting)"
     if custom_setting_text:
@@ -182,6 +211,8 @@ Shot intent (camera/tone hint from the narrator):
 
 Characters visible in this image:
 {actor_block}
+
+{clothing_block}
 
 {mood_block}
 
