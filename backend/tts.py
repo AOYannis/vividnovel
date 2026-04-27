@@ -128,6 +128,25 @@ def parse_speech_segments(text: str) -> list[dict]:
     return out
 
 
+_TRAILING_PAUSE_RE = __import__("re").compile(r"(?:\s*\[(?:pause|long-pause|breath)\])+\s*$")
+_LEADING_PAUSE_RE = __import__("re").compile(r"^\s*(?:\[(?:pause|long-pause|breath)\]\s*)+")
+
+
+def dedupe_boundary_pauses(segments_text: list[str]) -> list[str]:
+    """When neighbouring segments end / start with [pause]-style tokens, the MP3
+    concat plays them as a double pause that feels like an audio glitch. Walk the
+    list and trim trailing pauses on a segment if the next one starts with one.
+    Returns a new list of the same length."""
+    if not segments_text:
+        return segments_text
+    out = list(segments_text)
+    for i in range(len(out) - 1):
+        next_text = out[i + 1] or ""
+        if _LEADING_PAUSE_RE.match(next_text):
+            out[i] = _TRAILING_PAUSE_RE.sub("", out[i] or "")
+    return out
+
+
 def concat_audio_chunks(chunks: list[bytes], output_format: str = "MP3") -> bytes:
     """Concatenate raw audio bytes. For MP3, naive frame concat works in browsers
     when all chunks share the same encoder settings (xAI TTS does). For WAV we
@@ -281,6 +300,25 @@ def _sanitize_tts_tags(text: str) -> str:
     return result.strip()
 
 
+_MODE_BRIEFS = {
+    "narration": (
+        "MODE = NARRATION (third-person voice-over by an inner narrator).\n"
+        "- Default tone: calm, intimate, almost confidential — like a film narrator over a slow shot.\n"
+        "- Pacing: SLOWER than dialogue. Use [pause] between sentences and [breath] between paragraphs.\n"
+        "- Emotion: subdued. <soft> for confidences, <whisper> only for very intimate moments.\n"
+        "- Avoid <loud>, <fast>, <build-intensity>, [laugh] — narration should feel like inner monologue.\n"
+        "- NEVER read stage directions aloud; just feel them in the pacing."
+    ),
+    "dialogue": (
+        "MODE = DIALOGUE (a character speaking out loud, in scene).\n"
+        "- Match the tone to the words: provocative → <emphasis>, intimate → <whisper>, urgent → <fast>.\n"
+        "- Allow [laugh] / [chuckle] / [sigh] when the line carries them.\n"
+        "- Pacing: natural conversational speed (faster than narration).\n"
+        "- Use [pause] sparingly, only for dramatic beats."
+    ),
+}
+
+
 async def enhance_speech_text(
     grok_client,
     text: str,
@@ -288,18 +326,25 @@ async def enhance_speech_text(
     voice: str = "ara",
     language: str = "fr",
     brief: str = "",
+    mode: str = "dialogue",
     grok_model: str = "grok-4-1-fast-non-reasoning",
 ) -> tuple[str, float, dict]:
     """Use Grok to rewrite plain text into an xAI-TTS-tagged expressive prompt.
     Returns (enhanced_text, elapsed_seconds, usage_dict).
     `usage_dict` is `{"input_tokens": int, "output_tokens": int, "cached_tokens": int}` —
     used by callers to roll the enhance cost into per-sequence totals.
+    `mode` selects the direction style — "narration" (slower, breathier, restrained)
+    vs "dialogue" (conversational, expressive). Default is "dialogue" so existing
+    callers (single-voice path) keep their old behaviour.
     Voice/language are NOT included in the user message — they tend to leak back
     into the output and get spoken aloud. They're only used here for logging context."""
     start = time.time()
+    mode_brief = _MODE_BRIEFS.get(mode, _MODE_BRIEFS["dialogue"])
     sys_msg = (
         "You are a voice direction assistant. Rewrite the user's text into an "
-        "expressive prompt for xAI Text-to-Speech.\n\n" + TTS_TAG_GUIDE
+        "expressive prompt for xAI Text-to-Speech.\n\n"
+        + mode_brief + "\n\n"
+        + TTS_TAG_GUIDE
     )
     user_msg = ""
     if brief.strip():

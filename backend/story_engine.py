@@ -1930,7 +1930,7 @@ class StoryEngine:
         from tts import (
             enhance_speech_text, generate_speech, extract_dialogue,
             generate_speech_direct_xai, select_speech_backend,
-            parse_speech_segments, concat_audio_chunks,
+            parse_speech_segments, concat_audio_chunks, dedupe_boundary_pauses,
         )
         audio_url = ""
         try:
@@ -1951,50 +1951,106 @@ class StoryEngine:
                 else:
                     # No quoted lines → fall back to full narration so the video still gets audio
                     print(f"[tts] Scene {scene_index}: dialogue_only requested but no quoted lines, using full narration")
-            spoken = text
-            enhance_elapsed = 0.0
-            enhance_usage = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
-            if enhance:
-                try:
-                    spoken, enhance_elapsed, enhance_usage = await enhance_speech_text(
-                        self.grok, text, voice=voice, language=language,
-                        grok_model=GROK_MODEL,
-                    )
-                    self._tts_enhance_input_tokens += enhance_usage.get("input_tokens", 0)
-                    self._tts_enhance_output_tokens += enhance_usage.get("output_tokens", 0)
-                    self._tts_enhance_cached_tokens += enhance_usage.get("cached_tokens", 0)
-                except Exception as e:
-                    print(f"[tts] Scene {scene_index}: enhance failed — {e}, falling back to raw text")
-                    spoken = text
 
-            # ── Phase A: multi-voice synthesis ───────────────────────────────
-            # Decide whether to split narration vs dialogue. Only do it when:
-            #   - we're not in dialogue_only mode (P-Video lip-sync needs ONE voice),
-            #   - we're not piping into a video (for_video_only is False),
-            #   - a distinct narration_voice was configured.
+            # Decide whether to go multi-voice. We split when:
+            #   - not in dialogue_only mode (P-Video lip-sync needs ONE voice)
+            #   - not piping into a video (for_video_only is False)
+            #   - a distinct narration_voice was configured
+            #   - the parsed text actually has BOTH narration prose and dialogue
             multi_voice_eligible = (
                 not dialogue_only
                 and not for_video_only
                 and bool(narration_voice)
             )
-            segments: list[tuple[str, str]] = []  # [(text, voice_to_use), ...]
+
+            segments: list[tuple[str, str]] = []  # [(enhanced_text, voice_to_use), ...]
+            enhance_elapsed = 0.0
+            enhance_usage_total = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
+            spoken = text  # Used for log + scene_audio_ready event
+
+            # Pick the speaker voice once — used both for the multi-voice path
+            # and for narration-only / dialogue-only single-voice routing below.
+            av = actor_voices or {}
+            speaker_voice = voice  # configured fallback dialogue voice
+            if actors_present:
+                for code in actors_present:
+                    if code in av:
+                        speaker_voice = av[code]
+                        break
+
+            single_mode = "dialogue"  # default mode for the single-voice fallback below
+
             if multi_voice_eligible:
-                parsed = parse_speech_segments(spoken)
-                if any(s["kind"] == "dialogue" for s in parsed) and any(s["kind"] == "narration" for s in parsed):
-                    # Pick speaker voice for dialogue. Phase B leaves us per-actor
-                    # voices keyed by codename. With a single actor in scene → use
-                    # their voice. With multiple → use the first one (good enough
-                    # for Phase A; smart attribution comes later).
-                    av = actor_voices or {}
-                    speaker_voice = voice  # default
-                    if actors_present:
-                        for code in actors_present:
-                            if code in av:
-                                speaker_voice = av[code]
-                                break
-                    for s in parsed:
-                        v = narration_voice if s["kind"] == "narration" else speaker_voice
-                        segments.append((s["text"], v))
+                parsed = parse_speech_segments(text)
+                has_dialogue = any(s["kind"] == "dialogue" for s in parsed)
+                has_narration = any(s["kind"] == "narration" for s in parsed)
+                # Pure-narration scene → single voice = narration_voice + narration mode.
+                # Pure-dialogue scene → single voice = speaker_voice + dialogue mode.
+                # Mixed → multi-voice path (segment-by-segment).
+                if has_narration and not has_dialogue:
+                    voice = narration_voice
+                    single_mode = "narration"
+                elif has_dialogue and not has_narration:
+                    voice = speaker_voice
+                    single_mode = "dialogue"
+                has_both = has_narration and has_dialogue
+                if has_both:
+
+                    # Per-segment enhance with the right mode + voice. Run in
+                    # parallel — adds ~1s vs single enhance, much better direction.
+                    if enhance:
+                        async def _enh(seg: dict) -> tuple[str, str, float, dict]:
+                            seg_voice = narration_voice if seg["kind"] == "narration" else speaker_voice
+                            seg_mode = "narration" if seg["kind"] == "narration" else "dialogue"
+                            try:
+                                enhanced, el, usage = await enhance_speech_text(
+                                    self.grok, seg["text"],
+                                    voice=seg_voice, language=language,
+                                    mode=seg_mode, grok_model=GROK_MODEL,
+                                )
+                            except Exception as e:
+                                print(f"[tts] Scene {scene_index}: enhance segment failed — {e}, raw text")
+                                enhanced, el, usage = seg["text"], 0.0, {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
+                            return enhanced, seg_voice, el, usage
+                        gather = await asyncio.gather(*[_enh(s) for s in parsed])
+                        segments_text = [g[0] for g in gather]
+                        segments_voices = [g[1] for g in gather]
+                        # Dedupe pauses at boundaries (avoids double-pause concat glitches)
+                        segments_text = dedupe_boundary_pauses(segments_text)
+                        segments = list(zip(segments_text, segments_voices))
+                        enhance_elapsed = round(max((g[2] for g in gather), default=0.0), 2)
+                        for g in gather:
+                            for k in enhance_usage_total:
+                                enhance_usage_total[k] += g[3].get(k, 0)
+                        spoken = "\n".join(segments_text)
+                    else:
+                        # No enhance — segment plain text directly
+                        for s in parsed:
+                            v = narration_voice if s["kind"] == "narration" else speaker_voice
+                            segments.append((s["text"], v))
+                        spoken = text
+
+                    # Roll up enhance usage into the engine's total
+                    self._tts_enhance_input_tokens += enhance_usage_total["input_tokens"]
+                    self._tts_enhance_output_tokens += enhance_usage_total["output_tokens"]
+                    self._tts_enhance_cached_tokens += enhance_usage_total["cached_tokens"]
+
+            # Single-voice fallback path — used when not eligible for split,
+            # or when the text doesn't have both narration and dialogue. The
+            # mode + voice for this path were set above (single_mode, voice).
+            if not segments:
+                if enhance:
+                    try:
+                        spoken, enhance_elapsed, enhance_usage = await enhance_speech_text(
+                            self.grok, text, voice=voice, language=language,
+                            mode=single_mode, grok_model=GROK_MODEL,
+                        )
+                        self._tts_enhance_input_tokens += enhance_usage.get("input_tokens", 0)
+                        self._tts_enhance_output_tokens += enhance_usage.get("output_tokens", 0)
+                        self._tts_enhance_cached_tokens += enhance_usage.get("cached_tokens", 0)
+                    except Exception as e:
+                        print(f"[tts] Scene {scene_index}: enhance failed — {e}, falling back to raw text")
+                        spoken = text
 
             # ── Synthesis path ───────────────────────────────────────────────
             backend = select_speech_backend(prefer_url=for_video_only, stereo=stereo)
