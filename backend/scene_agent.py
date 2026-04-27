@@ -36,8 +36,8 @@ EVERY image is shot from the player's eyes. Camera = player's eyes.
 - Open the prompt EARLY with a POV marker: `POV first-person`, `eye-level POV`,
   `seen from a first-person perspective`, `looking down`, `looking across`, etc.
 - NEVER describe a third-person wide shot of two full bodies side by side.
-- If the male player is physically present in the scene, only his **hands, forearms,
-  lower torso** may enter at the frame edges — NEVER his full face or body.
+- If the male player has physical presence in the scene, only his **hands, forearms,
+  lower torso** may enter at the frame edges (as if he was looking at them through the camera) — NEVER his full face or body.
 - If the player is not male, same rule: his/her body is the camera, never a tiered subject.
 
 # Structure — 4 layers (Camera Director Formula)
@@ -94,7 +94,8 @@ The lighting style you pick (Layer 3) MUST be consistent with the time of day.
   Other characters' triggers, if provided, appear inline, just before that character's
   description in the prompt body. Never stack multiple triggers at the start — that
   blends the LoRAs and the characters end up looking alike.
-- If NO actor is in the scene (atmospheric shot), no trigger word at all.
+- If NO actor is in the scene (atmospheric shot), no character trigger word is necessary.
+- some mood specialized do also require a triggerword , see below
 
 # Mood directive
 A mood directive is provided separately when the scene calls for one. The runtime AUTOMATICALLY

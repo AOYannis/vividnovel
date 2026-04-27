@@ -1,6 +1,7 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { useT } from '../../i18n'
 import { useGameStore } from '../../stores/gameStore'
+import { useSceneAudio } from '../../hooks/useSceneAudio'
 import { streamSceneChat, regenSceneVideo } from '../../api/client'
 import type { ImageSlot } from '../../api/types'
 
@@ -39,30 +40,6 @@ const LORA_NAMES: Record<string, string> = {
 
 function loraShortName(id: string): string {
   return LORA_NAMES[id] || id.replace('warmline:', '').replace('@1', '')
-}
-
-// Global audio unlock — once the user interacts with any scene, all scenes can auto-play with sound.
-// Browser autoplay policies require a user gesture (click/tap/keydown) on this DOCUMENT before
-// programmatic audio.play() will succeed. We listen for the first such gesture page-wide so we
-// don't depend on the user happening to tap the video element specifically.
-let _audioUnlocked = false
-const _audioListeners = new Set<() => void>()
-function globalUnlockAudio() {
-  if (_audioUnlocked) return
-  _audioUnlocked = true
-  _audioListeners.forEach((fn) => fn())
-}
-
-if (typeof window !== 'undefined') {
-  const onFirstGesture = () => {
-    globalUnlockAudio()
-    window.removeEventListener('pointerdown', onFirstGesture, true)
-    window.removeEventListener('touchstart', onFirstGesture, true)
-    window.removeEventListener('keydown', onFirstGesture, true)
-  }
-  window.addEventListener('pointerdown', onFirstGesture, true)
-  window.addEventListener('touchstart', onFirstGesture, { capture: true, passive: true })
-  window.addEventListener('keydown', onFirstGesture, true)
 }
 
 const LINES_PER_PAGE = 3
@@ -165,7 +142,10 @@ export default function SceneCard({
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [videoMuted, setVideoMuted] = useState(true)
-  const [audioReady, setAudioReady] = useState(_audioUnlocked)
+  // Page-level singleton TTS audio. The hook owns the <audio> element + the
+  // first-gesture warmup. `isWarmed` doubles as the "audio is unlocked" signal
+  // for the video unmute logic below — same role the old `audioReady` state had.
+  const { playScene: playSceneAudio, pauseScene: pauseSceneAudio, isWarmed: audioReady } = useSceneAudio()
   const [videoRegenLoading, setVideoRegenLoading] = useState(false)
   const [showVideoPrompt, setShowVideoPrompt] = useState(false)
   const [videoPromptEdit, setVideoPromptEdit] = useState('')
@@ -187,7 +167,6 @@ export default function SceneCard({
     }
   }, [image.status, image.url, image.sceneVideoUrl, image.sceneVideoSimulated])
   const sceneVideoRef = useRef<HTMLVideoElement>(null)
-  const sceneAudioRef = useRef<HTMLAudioElement>(null)
   const soundPlayCount = useRef(0) // how many loops have played with sound
 
   // ── Standalone TTS narration audio ──
@@ -196,58 +175,19 @@ export default function SceneCard({
   // - or the video has already arrived (its soundtrack covers the scene)
   const sceneAudioSrc = image.sceneAudioData || image.sceneAudioUrl
   const playStandaloneAudio = !!sceneAudioSrc && !image.sceneVideoUrl && !image.sceneAudioForVideoOnly
-  const audioStartedRef = useRef(false)
   useEffect(() => {
-    const a = sceneAudioRef.current
-    if (!a || !playStandaloneAudio) return
-    if (!isViewing) {
-      a.pause()
-      return
+    if (!playStandaloneAudio || !sceneAudioSrc) return
+    if (isViewing) {
+      // Routed through the page-level singleton <audio> element so iOS
+      // Safari's per-element autoplay restriction doesn't bite each new scene.
+      playSceneAudio(sceneAudioSrc, index)
+    } else {
+      // Pass our index so we don't pause the singleton when it's playing a
+      // DIFFERENT scene's audio (e.g. our own audio just finished loading
+      // late while the user is on another scene).
+      pauseSceneAudio(index)
     }
-    a.muted = false
-    // Only reset on the FIRST play of this clip. If the user scrolled away mid-clip
-    // and came back, resume from where they left off (no restart from zero).
-    if (!audioStartedRef.current) {
-      a.currentTime = 0
-      audioStartedRef.current = true
-    }
-
-    let cancelled = false
-    const tryPlay = (attempt: number) => {
-      if (cancelled) return
-      a.play()
-        .then(() => globalUnlockAudio())
-        .catch((err: any) => {
-          if (cancelled) return
-          // NotAllowedError = autoplay policy block → mute fallback is the right answer.
-          // Anything else (commonly "the element has no supported sources" or aborted
-          // because the audio bytes/data URI haven't been decoded yet) → DO NOT mute,
-          // wait for `canplay` and retry unmuted. Muting here was the bug that made
-          // some scenes "play" silently and seem to have no audio.
-          if (err && err.name === 'NotAllowedError') {
-            a.muted = true
-            a.play().catch(() => {})
-            return
-          }
-          if (attempt >= 1) return  // already retried once
-          const onCanPlay = () => {
-            a.removeEventListener('canplay', onCanPlay)
-            tryPlay(attempt + 1)
-          }
-          a.addEventListener('canplay', onCanPlay, { once: true })
-        })
-    }
-    tryPlay(0)
-    return () => { cancelled = true }
-  }, [isViewing, audioReady, playStandaloneAudio])
-
-  // Subscribe to global audio unlock
-  useEffect(() => {
-    if (_audioUnlocked) { setAudioReady(true); return }
-    const handler = () => setAudioReady(true)
-    _audioListeners.add(handler)
-    return () => { _audioListeners.delete(handler) }
-  }, [])
+  }, [isViewing, sceneAudioSrc, playStandaloneAudio, index, playSceneAudio, pauseSceneAudio])
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
 
@@ -511,9 +451,10 @@ export default function SceneCard({
     if ((e.target as HTMLElement).closest('button')) return
 
     const v = sceneVideoRef.current
-    // If video is present and muted → unmute and play (user gesture, works on mobile)
+    // If video is present and muted → unmute and play (user gesture, works on mobile).
+    // The page-level useSceneAudio hook listens for this same gesture too and will
+    // warm its singleton <audio> element automatically.
     if (v && image.sceneVideoUrl && videoMuted) {
-      globalUnlockAudio()
       soundPlayCount.current = 0
       v.muted = false
       v.currentTime = 0
@@ -607,22 +548,13 @@ export default function SceneCard({
               <span className="text-[10px] text-white/50 font-mono">{videoWaitSeconds}s</span>
             </div>
           )}
-          {/* TTS narration audio (hidden player — only plays when no video yet) */}
-          {playStandaloneAudio && (
-            <>
-              <audio
-                ref={sceneAudioRef}
-                src={sceneAudioSrc}
-                preload="auto"
-                className="hidden"
-              />
-              {isViewing && (
-                <div className="absolute top-3 right-3 z-[5] bg-amber-600/70 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 pointer-events-none">
-                  <div className="w-2 h-2 rounded-full bg-amber-200 animate-pulse" />
-                  <span className="text-[10px] text-white/90 font-mono">VOICE</span>
-                </div>
-              )}
-            </>
+          {/* TTS narration audio is played via the page-level singleton in
+              useSceneAudio. Just render the in-frame "VOICE" indicator here. */}
+          {playStandaloneAudio && isViewing && (
+            <div className="absolute top-3 right-3 z-[5] bg-amber-600/70 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 pointer-events-none">
+              <div className="w-2 h-2 rounded-full bg-amber-200 animate-pulse" />
+              <span className="text-[10px] text-white/90 font-mono">VOICE</span>
+            </div>
           )}
           {/* Adapted image (from chat) — overlays when viewing chat pages */}
           {adaptedImageUrl && (

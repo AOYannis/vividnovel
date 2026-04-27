@@ -38,17 +38,17 @@ export default function SetupPage() {
   const [videoMode, setVideoMode] = useState<'256_10' | '256_5' | '540_5'>('256_10')
   const [videoBackend, setVideoBackend] = useState<'davinci' | 'pvideo' | 'none'>('pvideo')
   const [videoDraftMode, setVideoDraftMode] = useState(true)
-  const [videoStartScene, setVideoStartScene] = useState(0)  // 0=all, 4=last 4 only
-  const [pvideoPromptUpsampling, setPvideoPromptUpsampling] = useState<'default' | 'on' | 'off'>('default')
+  const [videoStartScene, setVideoStartScene] = useState(6)  // 0=all, 4=last 4, 6=last 2
+  const [pvideoPromptUpsampling, setPvideoPromptUpsampling] = useState<'default' | 'on' | 'off'>('off')
   // Voice / TTS settings
-  const [voiceNarration, setVoiceNarration] = useState(false)
-  const [voiceToVideo, setVoiceToVideo] = useState(false)
+  const [voiceNarration, setVoiceNarration] = useState(true)
+  const [voiceToVideo, setVoiceToVideo] = useState(true)
   const [voiceId, setVoiceId] = useState('ara')
   // null means "follow game language"; user can override to a specific BCP-47 code
   const [voiceLanguage, setVoiceLanguage] = useState<string | null>(null)
   const [voiceEnhance, setVoiceEnhance] = useState(true)
   const [voiceStereo, setVoiceStereo] = useState(true)
-  const [sliceOfLife, setSliceOfLife] = useState(false)
+  const [sliceOfLife, setSliceOfLife] = useState(true)
 
   // Grok model selection
   const [grokModels, setGrokModels] = useState<GrokModel[]>([])

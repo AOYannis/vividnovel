@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useGameStore } from '../stores/gameStore'
 import { useStoryStream } from '../hooks/useStoryStream'
+import { useSceneAudio } from '../hooks/useSceneAudio'
 import { useT } from '../i18n'
 import { regenImage, regenVideo } from '../api/client'
 import DebugPanel from '../components/DebugPanel'
@@ -20,6 +21,10 @@ export default function GamePage() {
     reset, activeSegmentIndex, completedSequences, world,
   } = useGameStore()
   const { startSequence } = useStoryStream()
+  // Install the page-level singleton <audio> + first-gesture warmup BEFORE any
+  // SceneCard mounts, so the very first scroll-to-scene already has an unlocked
+  // audio element to play through (critical on iOS Safari).
+  useSceneAudio()
   const [mapOpen, setMapOpen] = useState(false)
   const startedRef = useRef(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
