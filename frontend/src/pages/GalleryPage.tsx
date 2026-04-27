@@ -80,6 +80,11 @@ export default function GalleryPage() {
   const totalCost = session?.total_costs?.total || 0
   const totalGrok = session?.total_costs?.grok_cost || 0
   const totalImage = session?.total_costs?.image_cost || 0
+  const totalVideo = session?.total_costs?.video_cost || 0
+  const totalTTS = session?.total_costs?.tts_cost || 0
+  // Anything not explicitly categorised — should normally be 0; if non-zero
+  // it's a cost source we haven't surfaced yet (good signal to investigate).
+  const totalOther = Math.max(0, totalCost - totalGrok - totalImage - totalVideo - totalTTS)
   const playerName = session?.player?.name || 'Anonyme'
   const settingLabel = session?.setting === 'custom' ? 'Custom' : session?.setting?.replace('_', ' ')
 
@@ -97,7 +102,14 @@ export default function GalleryPage() {
             <p className="text-xs text-neutral-500 mt-0.5">
               {playerName} &middot; {settingLabel} &middot; {sequences.length} seq &middot;
               <span className="text-emerald-400/60 font-mono ml-1">${totalCost.toFixed(4)}</span>
-              <span className="text-neutral-600 ml-2">(LLM ${totalGrok.toFixed(3)} &middot; Img ${totalImage.toFixed(3)})</span>
+              <span className="text-neutral-600 ml-2">
+                (LLM ${totalGrok.toFixed(3)}
+                {' · '}Img ${totalImage.toFixed(3)}
+                {totalVideo > 0 && <> · Vid ${totalVideo.toFixed(3)}</>}
+                {totalTTS > 0 && <> · TTS ${totalTTS.toFixed(3)}</>}
+                {totalOther > 0.0005 && <> · Other ${totalOther.toFixed(3)}</>}
+                )
+              </span>
             </p>
           </div>
           <button

@@ -328,17 +328,25 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       case 'scene_video_ready': {
         // Davinci video — route to current sequence or completed sequence
         const videoSeqNum = (event as any).sequence_number ?? state.sequenceNumber
+        const sceneVideoCost = Number((event as any).cost ?? 0) || 0
+        const isSimulated = (event as any).simulated === true
         if (videoSeqNum === state.sequenceNumber || videoSeqNum === state.sequenceNumber - 1) {
           // Might belong to current sequence images (if not yet archived)
-          const isSimulated = (event as any).simulated === true
           const currentHasScene = state.images.some((img) => img.index === event.index && img.status === 'ready')
           if (currentHasScene) {
+            // Top-up the live sequenceCosts.video_cost in case the per-scene video
+            // arrived AFTER sequence_complete fired (P-Video typically takes 20-60s
+            // and the choice screen ships earlier with a partial estimate).
+            const liveCosts = state.sequenceCosts
+              ? { ...state.sequenceCosts, video_cost: (state.sequenceCosts.video_cost ?? 0) + sceneVideoCost, total_sequence_cost: (state.sequenceCosts.total_sequence_cost ?? 0) + sceneVideoCost }
+              : state.sequenceCosts
             set({
               images: state.images.map((img) =>
                 img.index === event.index
                   ? { ...img, sceneVideoUrl: isSimulated ? undefined : event.url, sceneVideoSimulated: isSimulated }
                   : img
               ),
+              sequenceCosts: liveCosts,
             })
             break
           }
@@ -352,6 +360,14 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
                 ? { ...img, sceneVideoUrl: isSimulated ? undefined : event.url, sceneVideoSimulated: isSimulated }
                 : img
             )
+            // Top up costs on the archived sequence too
+            if (seq.costs && sceneVideoCost > 0) {
+              seq.costs = {
+                ...seq.costs,
+                video_cost: (seq.costs.video_cost ?? 0) + sceneVideoCost,
+                total_sequence_cost: (seq.costs.total_sequence_cost ?? 0) + sceneVideoCost,
+              }
+            }
             set({ completedSequences: completed })
             break
           }

@@ -36,7 +36,7 @@ export type SSEEvent =
   | { type: 'choices_available'; choices: Choice[] }
   | { type: 'sequence_complete'; sequence_number: number; costs: SequenceCosts; relationships?: Record<string, RelationshipData> }
   | { type: 'debug_context'; system_prompt_length: number; persistent_memory: string; narrative_memory: string; grok_model: string; sequence_number: number }
-  | { type: 'scene_video_ready'; index: number; sequence_number: number; url: string; generation_time: number; job_id: string }
+  | { type: 'scene_video_ready'; index: number; sequence_number: number; url: string; generation_time: number; job_id: string; cost?: number; simulated?: boolean }
   | { type: 'scene_video_error'; index: number; error: string }
   | { type: 'scene_audio_ready'; index: number; sequence_number: number; url: string; audio_data?: string | null; voice: string; language: string; char_count: number; cost: number; generation_time: number; enhanced_text?: string | null; for_video_only?: boolean; dialogue_only?: boolean }
   | { type: 'scene_audio_error'; index: number; error: string }

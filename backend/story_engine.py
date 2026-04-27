@@ -365,6 +365,10 @@ class StoryEngine:
             self._tts_enhance_input_tokens = 0    # Grok enhance call input tokens (cumulative)
             self._tts_enhance_output_tokens = 0
             self._tts_enhance_cached_tokens = 0
+            # Per-scene video cost accumulator — P-Video and Davinci tasks fire
+            # concurrently and emit costs via scene_video_ready events, but those
+            # need to be summed back into the per-sequence total.
+            self._scene_video_cost_total = 0.0
 
             # Loop: stream Grok, intercept tool calls, fire images, continue
             early_start = session.video_settings.get("early_start", False)
@@ -802,6 +806,11 @@ class StoryEngine:
             image_total_cost = sum(
                 img.get("cost", 0) for img in completed_images.values()
             )
+            # Per-scene videos (P-Video) fire concurrently; sum whatever has
+            # completed by now into video_cost. Late-arriving scene_video_ready
+            # events also carry per-scene cost, so the frontend can top-up the
+            # per-sequence number as remaining videos finish.
+            video_cost = (video_cost or 0) + self._scene_video_cost_total
             # TTS cost: audio bytes (xAI/Runware) + the Grok enhance call.
             # Enhance uses the same Grok model & pricing as the main story (it's
             # the same client), so apply the same input/cached/output rates.
@@ -1531,6 +1540,7 @@ class StoryEngine:
             }, audio_url=audio_url)
             video_url = result.get("url", "")
             video_cost = result.get("cost", 0) or 0
+            self._scene_video_cost_total += video_cost
             print(f"[pvideo] Scene {scene_index} (seq {sequence_number}): done in {result['elapsed']}s (${video_cost:.3f})")
             await sse_queue.put({
                 "type": "scene_video_ready",
