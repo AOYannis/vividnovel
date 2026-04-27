@@ -357,6 +357,7 @@ class StoryEngine:
             sequence_start = time.time()
             grok_input_tokens = 0
             grok_output_tokens = 0
+            grok_cached_tokens = 0  # cumulative across rounds — measures cache hit effectiveness
 
             # Loop: stream Grok, intercept tool calls, fire images, continue
             early_start = session.video_settings.get("early_start", False)
@@ -389,19 +390,35 @@ class StoryEngine:
                             "input_image_index": 0,
                         })
 
+                # x-grok-conv-id: stable per-session header that xAI uses to
+                # route subsequent requests to the same prompt-cache shard,
+                # maximising hit rate (~75% off cached input tokens).
+                # stream_options.include_usage: surface the final usage object
+                # (incl. prompt_tokens_details.cached_tokens) on the last chunk
+                # so we can measure actual cache hit rate per round.
                 stream = await self.grok.chat.completions.create(
                     model=model,
                     messages=messages,
                     tools=ALL_TOOLS,
                     parallel_tool_calls=False,
                     stream=True,
+                    stream_options={"include_usage": True},
+                    extra_headers={"x-grok-conv-id": session.id} if session and getattr(session, "id", None) else None,
                 )
 
                 content_acc = ""
                 tool_calls_acc: dict[int, dict] = {}
                 finish_reason = None
+                round_usage = None  # populated by the final chunk when stream_options.include_usage is set
 
                 async for chunk in stream:
+                    # The final chunk in an include_usage stream carries `usage` with
+                    # `prompt_tokens`, `completion_tokens`, and `prompt_tokens_details.cached_tokens`.
+                    # That chunk has an empty `choices` array, so we capture usage and skip.
+                    if getattr(chunk, "usage", None):
+                        round_usage = chunk.usage
+                    if not chunk.choices:
+                        continue
                     choice = chunk.choices[0]
                     delta = choice.delta
 
@@ -444,11 +461,18 @@ class StoryEngine:
                     if choice.finish_reason:
                         finish_reason = choice.finish_reason
 
-                # Estimate tokens from this round
-                round_input_est = len(json.dumps(messages).encode()) // 4
-                round_output_est = len(content_acc.encode()) // 4
-                grok_input_tokens += round_input_est
-                grok_output_tokens += round_output_est
+                # Token accounting — prefer real usage from the API; fall back to
+                # char-based estimate if the include_usage stream didn't deliver
+                # (older models, network truncation, etc.).
+                if round_usage is not None:
+                    grok_input_tokens += getattr(round_usage, "prompt_tokens", 0) or 0
+                    grok_output_tokens += getattr(round_usage, "completion_tokens", 0) or 0
+                    details = getattr(round_usage, "prompt_tokens_details", None)
+                    if details is not None:
+                        grok_cached_tokens += getattr(details, "cached_tokens", 0) or 0
+                else:
+                    grok_input_tokens += len(json.dumps(messages).encode()) // 4
+                    grok_output_tokens += len(content_acc.encode()) // 4
 
                 # Handle based on finish reason
                 if finish_reason == "tool_calls" and tool_calls_acc:
@@ -748,8 +772,15 @@ class StoryEngine:
 
             # Compute costs (after video so we include video_cost)
             elapsed = round(time.time() - sequence_start, 1)
+            # Cached input tokens are billed at a fraction of the regular input price.
+            # Default discount: 75% off (matches Grok 4.1 Fast: $0.20→$0.05/M).
+            # Pricing entries can override via a "cached" field if the model has a
+            # different cache rate (e.g. Grok 4.20 is 90% off).
+            cached_price = pricing.get("cached", pricing["input"] * 0.25)
+            non_cached_input = max(0, grok_input_tokens - grok_cached_tokens)
             grok_cost = (
-                grok_input_tokens * pricing["input"]
+                non_cached_input * pricing["input"]
+                + grok_cached_tokens * cached_price
                 + grok_output_tokens * pricing["output"]
             ) / 1_000_000
             image_total_cost = sum(
@@ -854,7 +885,8 @@ class StoryEngine:
             # Log narration + costs
             log.log_narration(narration_segments)
             log.log_costs(grok_cost, image_total_cost, video_cost, total_cost,
-                          grok_input_tokens, grok_output_tokens, elapsed)
+                          grok_input_tokens, grok_output_tokens, elapsed,
+                          cached_tokens=grok_cached_tokens)
 
             # Persist to database (after video is done)
             import db as _db

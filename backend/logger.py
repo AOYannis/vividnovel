@@ -185,13 +185,17 @@ class SequenceLogger:
         })
 
     def log_costs(self, grok_cost: float, image_cost: float, video_cost: float,
-                  total: float, input_tokens: int, output_tokens: int, elapsed: float):
-        self._print(f"COSTS: grok=${grok_cost:.4f} ({input_tokens}in/{output_tokens}out) | "
+                  total: float, input_tokens: int, output_tokens: int, elapsed: float,
+                  cached_tokens: int = 0):
+        cache_pct = (100 * cached_tokens / input_tokens) if input_tokens else 0
+        self._print(f"COSTS: grok=${grok_cost:.4f} ({input_tokens}in/{cached_tokens}cached={cache_pct:.0f}%/{output_tokens}out) | "
                      f"images=${image_cost:.4f} | video=${video_cost:.4f} | "
                      f"TOTAL=${total:.4f} | {elapsed}s")
         self._add("costs", {
             "grok_cost": grok_cost,
             "grok_input_tokens": input_tokens,
+            "grok_cached_tokens": cached_tokens,
+            "grok_cache_hit_pct": round(cache_pct, 1),
             "grok_output_tokens": output_tokens,
             "image_cost": image_cost,
             "video_cost": video_cost,

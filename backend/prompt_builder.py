@@ -49,7 +49,17 @@ def build_system_prompt(
             data = {**data, **custom_actor_override}
         cast_actors.append((code, data))
 
-    sections = []
+    # ── Cache-friendly assembly ─────────────────────────────────────────────
+    # We split the prompt into three buckets so the final ordering puts
+    # cache-friendly STATIC content first, then SEMI-STATIC (same all session),
+    # then DYNAMIC (changes between sequences). xAI's automatic prompt caching
+    # works on message-prefix match — anything that differs between calls
+    # invalidates the cache from that point onward, so dynamic content MUST go
+    # at the end. ~75% off cached input tokens on Grok 4.1 Fast (Apr 2026).
+    static_sections: list[str] = []
+    semi_static_sections: list[str] = []
+    dynamic_sections: list[str] = []
+    sections = static_sections  # alias for the next append (Role section is static)
 
     # ─── Role ─────────────────────────────────────────────
     sections.append(
@@ -59,6 +69,7 @@ def build_system_prompt(
     )
 
     # ─── Language ─────────────────────────────────────────
+    sections = semi_static_sections
     if language != "fr":
         sections.append(
             f"## ⚠️ LANGUE — RÈGLE ABSOLUE PRIORITAIRE ⚠️\n"
@@ -74,6 +85,7 @@ def build_system_prompt(
         )
 
     # ─── Creativity & originality ──────────────────────────
+    sections = static_sections
     sections.append(
         "## ORIGINALITÉ (règle absolue)\n"
         "Tu es un auteur INVENTIF et IMPRÉVISIBLE, pas un générateur de clichés.\n"
@@ -93,6 +105,7 @@ def build_system_prompt(
     )
 
     # ─── CRITICAL: Execution flow ─────────────────────────
+    # static — references IMAGES_PER_SEQUENCE constant only
     sections.append(
         f"## DÉROULEMENT — RÈGLE CRITIQUE\n"
         f"\n"
@@ -115,6 +128,7 @@ def build_system_prompt(
     )
 
     # ─── Narration rules ──────────────────────────────────
+    sections = semi_static_sections  # uses lang_config (session-stable)
     sections.append(
         "## Narration & dialogues\n"
         f"- {lang_config['narration_rule']}\n"
@@ -131,6 +145,7 @@ def build_system_prompt(
     )
 
     # ─── Storytelling philosophy ─────────────────────────
+    sections = static_sections
     sections.append(
         "## Approche narrative\n"
         "\n"
@@ -192,6 +207,7 @@ def build_system_prompt(
     )
 
     # ─── Memory usage guidelines ──────────────────────────
+    # static — same content every call
     sections.append(
         "## Mémoire narrative — comment l'utiliser\n"
         "Des faits des séquences précédentes peuvent apparaître en fin de prompt.\n"
@@ -213,6 +229,7 @@ def build_system_prompt(
     )
 
     # ─── Player ───────────────────────────────────────────
+    sections = semi_static_sections  # session-stable
     p = player
     sections.append(
         f"## Le joueur\n"
@@ -319,6 +336,7 @@ def build_system_prompt(
     sections.append(cast_text)
 
     # ─── Relationship progress ─────────────────────────
+    sections = dynamic_sections  # changes between sequences as relationships level up
     if relationships:
         _level_labels = {
             0: "STRANGER (vient juste de croiser)",
@@ -350,6 +368,7 @@ def build_system_prompt(
 
     # ─── Actor pool (available for introduction) ────────
     # List all LoRA actors NOT in the initial cast — Grok can introduce them
+    sections = semi_static_sections  # cast-derived but session-stable
     cast_codes = {code for code, _ in cast_actors} - {"custom"}
     pool_actors = {
         code: data for code, data in ACTOR_REGISTRY.items()
@@ -414,20 +433,24 @@ def build_system_prompt(
         "- N'introduis pas plus de 1-2 nouveaux personnages par séquence"
     )
 
-    # Inject known secondary characters from consistency state
-    known_secondary = (consistency_state or {}).get("secondary_characters", {})
-    if known_secondary:
-        secondary_cast_text += "\n\n### Personnages secondaires déjà établis\n"
-        secondary_cast_text += (
-            "Ces personnages ont déjà été introduits. Réutilise EXACTEMENT "
-            "les mêmes codenames et descriptions :\n"
-        )
-        for code, desc in known_secondary.items():
-            secondary_cast_text += f"- **{code}** : {desc}\n"
-
+    # Base secondary-cast instructions are session-stable
     sections.append(secondary_cast_text)
 
+    # The "déjà établis" appendix grows as Grok introduces NPCs across sequences
+    # — that's dynamic, so it goes to the dynamic bucket separately.
+    known_secondary = (consistency_state or {}).get("secondary_characters", {})
+    if known_secondary:
+        known_lines = [
+            "### Personnages secondaires déjà établis",
+            "Ces personnages ont déjà été introduits. Réutilise EXACTEMENT "
+            "les mêmes codenames et descriptions :",
+        ]
+        for code, desc in known_secondary.items():
+            known_lines.append(f"- **{code}** : {desc}")
+        dynamic_sections.append("\n".join(known_lines))
+
     # ─── Image prompt rules ───────────────────────────────
+    sections = semi_static_sections  # uses trigger_words[0] in examples — session-stable
     sections.append(
         "## Règles pour les prompts d'image (CRITIQUE)\n"
         "\n"
@@ -678,9 +701,11 @@ def build_system_prompt(
         "- Ne PAS combiner `explicit_mystic` avec `blowjob`, `doggystyle`, `titjob`, "
         "`handjob`, `cunnilingus` ou `sensual_tease` — le mood spécifique suffit"
     )
+    sections = semi_static_sections  # style_moods is session-stable
     sections.append("\n".join(mood_lines))
 
     # ─── Davinci dialogue for video ─────────────────────────
+    # semi — uses lang_config (session-stable)
     sections.append(
         "## Dialogue pour la vidéo (Davinci)\n"
         "Chaque scène génère une vidéo où le personnage PARLE. Le dialogue que tu écris\n"
@@ -695,6 +720,7 @@ def build_system_prompt(
     )
 
     # ─── Video clip (loops) ─────────────────────────────────
+    # semi — uses player['name'], session-stable
     sections.append(
         f"## Vidéo de fin de séquence (generate_scene_video)\n"
         f"Après la dernière image (image {IMAGES_PER_SEQUENCE - 1}), appelle **generate_scene_video** avec un `video_prompt` **en anglais** (1–3 phrases) : "
@@ -720,6 +746,7 @@ def build_system_prompt(
     )
 
     # ─── Consistency rules ────────────────────────────────
+    sections = static_sections
     sections.append(
         "## Cohérence visuelle\n"
         "Même si chaque prompt est autonome, tu dois maintenir la cohérence :\n"
@@ -736,6 +763,7 @@ def build_system_prompt(
 
     # ─── Character → actor lock (across all sequences) ──
     # Even if location isn't set yet, we want the lock to be visible.
+    sections = dynamic_sections  # grows as Grok meets characters
     char_actors = (consistency_state or {}).get("character_actors", {}) or {}
     if char_actors:
         lock_lines = [
@@ -931,4 +959,10 @@ def build_system_prompt(
             f"(narration + dialogues + choix). Pas un mot de français."
         )
 
-    return "\n\n".join(sections)
+    # ── Final assembly: STATIC → SEMI-STATIC → DYNAMIC ──────────────────────
+    # This ordering maximises xAI prompt-cache hit rate. The static prefix is
+    # identical across ALL sessions; the semi-static block is identical across
+    # all sequences in the same session; only the dynamic tail differs per
+    # sequence/round. Keep this order strictly.
+    final_sections = static_sections + semi_static_sections + dynamic_sections
+    return "\n\n".join(final_sections)

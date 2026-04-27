@@ -364,27 +364,34 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
         break
 
       case 'scene_audio_ready': {
+        // Attach the audio to whichever image entry matches `index` REGARDLESS of status.
+        // TTS now sometimes finishes before image gen (especially on the direct-xAI fast
+        // path) so the previous "must be 'ready'" gate would silently drop the audio and
+        // the user would hear nothing on that scene. We also grow the images array if
+        // image_requested hasn't arrived yet — the audio sits on a pending entry until
+        // the image catches up.
         const audioSeqNum = (event as any).sequence_number ?? state.sequenceNumber
+        const audioPatch = {
+          sceneAudioUrl: event.url,
+          sceneAudioData: event.audio_data || undefined,
+          sceneAudioForVideoOnly: !!event.for_video_only,
+        }
         if (audioSeqNum === state.sequenceNumber || audioSeqNum === state.sequenceNumber - 1) {
-          const currentHasScene = state.images.some((img) => img.index === event.index && img.status === 'ready')
-          if (currentHasScene) {
-            set({
-              images: state.images.map((img) =>
-                img.index === event.index
-                  ? { ...img, sceneAudioUrl: event.url, sceneAudioData: event.audio_data || undefined, sceneAudioForVideoOnly: !!event.for_video_only }
-                  : img
-              ),
-            })
-            break
+          let newImages = [...state.images]
+          while (newImages.length <= event.index) {
+            newImages.push({ index: newImages.length, status: 'pending' as const })
           }
+          newImages = newImages.map((img) =>
+            img.index === event.index ? { ...img, ...audioPatch } : img,
+          )
+          set({ images: newImages })
+          break
         }
         const completedAudio = [...state.completedSequences]
         for (const seq of completedAudio) {
           if (seq.sequenceNumber === audioSeqNum) {
             seq.images = seq.images.map((img) =>
-              img.index === event.index
-                ? { ...img, sceneAudioUrl: event.url, sceneAudioData: event.audio_data || undefined, sceneAudioForVideoOnly: !!event.for_video_only }
-                : img
+              img.index === event.index ? { ...img, ...audioPatch } : img,
             )
             set({ completedSequences: completedAudio })
             break
