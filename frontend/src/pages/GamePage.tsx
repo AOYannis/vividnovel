@@ -45,9 +45,19 @@ export default function GamePage() {
   }, [])
 
   // ── On resume: scroll to the bottom (choices / continue) ──
+  // Only fires when we MOUNT already in the 'choosing' step (i.e. user reopened the app
+  // on a saved choice screen). Must NOT fire when step *transitions* into 'choosing'
+  // during active play — that yanks the user away from whatever scene they're reading.
   const resumeScrolledRef = useRef(false)
+  const initialStepRef = useRef(step)
   useEffect(() => {
-    if (!resumeScrolledRef.current && step === 'choosing' && completedSequences.length > 0) {
+    const wasResumeMount = initialStepRef.current === 'choosing'
+    if (
+      wasResumeMount &&
+      !resumeScrolledRef.current &&
+      step === 'choosing' &&
+      completedSequences.length > 0
+    ) {
       resumeScrolledRef.current = true
       setTimeout(() => {
         const container = scrollContainerRef.current

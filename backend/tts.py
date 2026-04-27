@@ -17,51 +17,71 @@ SUPPORTED_LANGUAGES = [
 
 
 TTS_TAG_GUIDE = """xAI TTS reads the input LITERALLY — anything that isn't a recognized tag is spoken aloud,
-including parentheses, asterisks, ALL CAPS, ellipses, hyphens, and stage directions.
-The ONLY way to add expression is via the tags below.
+including parentheses, asterisks, ALL CAPS, ellipses, hyphens, em-dashes, markdown,
+and stage directions. The ONLY way to add expression is via the tags below.
 
-INLINE TAGS — place at the exact moment the sound occurs (no wrapping):
-  [pause]            short silence
-  [long-pause]       longer silence
-  [breath]           audible breath
-  [inhale]           sharp/deep inhale
-  [exhale]           audible exhale (great for tension release)
-  [sigh]             a sigh
-  [laugh]            short laugh
-  [chuckle]          quiet amused laugh
-  [giggle]           light playful laugh
-  [cry]              sob / cry
-  [tsk]              tongue-against-teeth disapproval
-  [tongue-click]     tongue click
-  [lip-smack]        lip smack
-  [hum-tune]         brief hummed melody
+INLINE TAGS — single token, no wrapping. Place at the exact moment the sound occurs:
+  [pause] [long-pause]
+  [breath] [inhale] [exhale] [sigh]
+  [laugh] [chuckle] [giggle] [cry]
+  [tsk] [tongue-click] [lip-smack] [hum-tune]
 
-WRAPPING TAGS — wrap the affected text:
-  <soft>...</soft>                          hushed, gentle
-  <whisper>...</whisper>                    quiet, intimate
-  <loud>...</loud>                          raised volume
-  <slow>...</slow>                          slower delivery
-  <fast>...</fast>                          rapid delivery
-  <higher-pitch>...</higher-pitch>          lifted pitch
-  <lower-pitch>...</lower-pitch>            dropped pitch
-  <build-intensity>...</build-intensity>    crescendo across the wrapped span
-  <decrease-intensity>...</decrease-intensity>   diminuendo across the wrapped span
-  <emphasis>...</emphasis>                  stress the wrapped word(s)
-  <sing-song>...</sing-song>                playful sing-song melody
-  <singing>...</singing>                    actually sung
-  <laugh-speak>...</laugh-speak>            speech mixed with laughter
+WRAPPING TAGS — MUST wrap text with both opening and closing tag, like XML:
+  <soft>text</soft>      <whisper>text</whisper>      <loud>text</loud>
+  <slow>text</slow>      <fast>text</fast>
+  <higher-pitch>text</higher-pitch>     <lower-pitch>text</lower-pitch>
+  <build-intensity>text</build-intensity>     <decrease-intensity>text</decrease-intensity>
+  <emphasis>text</emphasis>     <sing-song>text</sing-song>
+  <singing>text</singing>     <laugh-speak>text</laugh-speak>
 
-ABSOLUTE RULES — violate any of these and the output is broken:
-1. Do NOT use parentheses (softly), asterisks *sighs*, brackets [softly], em-dashes for direction,
-   or ANY stage-direction notation outside the tag list above. These will be SPOKEN LITERALLY.
-2. Do NOT add narration, character names, "she said", or any words the speaker would not say.
-3. Do NOT translate. Keep the source language exactly.
-4. Layer tags to be expressive: combine wrapping (e.g. <whisper>) with inline (e.g. [breath], [exhale])
-   to create real emotion — a flat sentence with one tag is a wasted opportunity. Aim for 3-7 tags
-   in a typical 1-3 sentence prompt.
-5. Match the tags to the Direction the user gave (intimate → <whisper>+[breath]+<slow>;
-   building tension → <build-intensity>+[inhale]; teasing → <sing-song>+[chuckle]; etc.).
-6. Output ONLY the rewritten spoken text with tags. No preamble, no explanation, no quotes around it.
+═══ SYNTAX RULES (violation = the tag name is spoken aloud) ═══
+1. Wrapping tags MUST be written as `<tag>text</tag>`. NEVER as `[soft]`, `[whisper]`, `[loud]`,
+   `[slow]`, `[fast]`, `[emphasis]` etc. — those are not valid inline tags and will be SPOKEN.
+2. Every `<tag>` you open MUST have a matching `</tag>` before the end of the output.
+3. Never nest the same tag inside itself (no `<soft>...<soft>...</soft>...</soft>`).
+4. NEVER use markdown: no `*word*`, no `**word**`, no `_word_`, no `# headings`.
+5. NEVER use parentheses for direction: no `(softly)`, no `(she whispers)`.
+6. NEVER write character names, "she said", "he replied", scene titles, or anything that isn't
+   the actual sound to be voiced.
+7. NEVER translate. Keep the source language verbatim.
+8. Output ONLY the spoken text with tags. No preamble, no quotes around the whole thing.
+
+═══ EXPRESSION PALETTE — use sparingly and CONTEXTUALLY ═══
+Treat tags like spice: the right amount makes the dish; too much ruins it. Restraint > density.
+
+NARRATOR PROSE (description, action, between dialogues):
+  • Default tone: dry voice, minimal tagging. Most narrative sentences need NO tags at all.
+  • Wrap a whole prose clause in <soft>...</soft> when the moment is intimate, tender, or hushed.
+  • Use <whisper>...</whisper> ONLY for genuinely whispered narration (rare — confidential, secretive).
+  • One [pause] at most per prose sentence, only where a real beat exists in the storytelling.
+  • Avoid [breath], [inhale], [exhale], [sigh] in pure narration — those are character sounds, not narrator sounds.
+  • Avoid <slow>, <fast>, <higher-pitch>, <lower-pitch>, <emphasis>, <sing-song>, <singing>,
+    <laugh-speak>, [laugh], [chuckle], [giggle], [cry], [tsk], [lip-smack], [hum-tune] in narration.
+
+DIALOGUES (text inside quotes — what a character actually says):
+  • Richer expression is welcome — match the speaker's emotion.
+  • Whispered, intimate line → <whisper>...</whisper> around the whole line, optional [breath] at start.
+  • Confident, loud line → <loud>...</loud> or <build-intensity>...</build-intensity>.
+  • Teasing, playful → <sing-song>...</sing-song> or [chuckle] / [giggle] at appropriate beats.
+  • Amused while talking → wrap in <laugh-speak>...</laugh-speak>.
+  • Stress one key word with <emphasis>word</emphasis> — at most one per dialogue line.
+  • Hesitation, thinking → [pause] mid-sentence, optionally [breath].
+  • Sad / breaking → <soft>...</soft>, [sigh] or [cry] only if the line truly demands it.
+
+═══ DENSITY GUIDE ═══
+For a typical scene (2-4 sentences, mix of narration + 1 dialogue line):
+  • 0-2 tags total in the narration prose.
+  • 2-4 tags inside the dialogue (one wrapping tag + 1-2 inline beats + at most one <emphasis>).
+  • Match the Direction (if provided) by choosing tags that fit the emotional brief — but never
+    use a tag just because the Direction mentioned a feeling; only use it if the *delivery* genuinely calls for it.
+
+═══ ANTI-PATTERNS — these are the failures we keep seeing, do NOT do them ═══
+  • `<slow>; </slow>` (wrapping a single semicolon — pointless)
+  • `<soft><slow>...whole paragraph...</soft>` (mismatched closing — ALWAYS close in reverse-open order)
+  • `[loud]` or `[whisper]` or `[soft]` (bracket form for wrapping tags — invalid)
+  • `*thump*` or `**Scene 2:**` (markdown — will be spoken literally)
+  • Using <emphasis> on every other word (loses meaning — stress one word per dialogue at most)
+  • Adding [breath] or [exhale] before every sentence (sounds asthmatic)
 """
 
 
@@ -78,11 +98,14 @@ def extract_dialogue(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-_LEAK_PREFIX_RE = __import__("re").compile(
+import re as _re
+
+
+_LEAK_PREFIX_RE = _re.compile(
     # Use [ \t]* instead of \s* so we don't consume the trailing newline (which would
     # let .* eat the next line of real content).
     r"^[ \t]*(voice|language|direction|text|brief)[ \t]*:[ \t]*[^\n]*$",
-    __import__("re").IGNORECASE | __import__("re").MULTILINE,
+    _re.IGNORECASE | _re.MULTILINE,
 )
 
 
@@ -92,8 +115,109 @@ def _strip_leaked_metadata(text: str) -> str:
     spoken aloud verbatim by xAI TTS."""
     cleaned = _LEAK_PREFIX_RE.sub("", text)
     # Collapse the blank lines we leave behind
-    cleaned = __import__("re").sub(r"\n{3,}", "\n\n", cleaned).strip()
+    cleaned = _re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned
+
+
+# Canonical tag sets — must match the prompt guide above.
+INLINE_TTS_TAGS = frozenset({
+    "pause", "long-pause", "breath", "inhale", "exhale", "sigh",
+    "laugh", "chuckle", "giggle", "cry",
+    "tsk", "tongue-click", "lip-smack", "hum-tune",
+})
+WRAPPING_TTS_TAGS = frozenset({
+    "soft", "whisper", "loud", "slow", "fast",
+    "higher-pitch", "lower-pitch",
+    "build-intensity", "decrease-intensity",
+    "emphasis", "sing-song", "singing", "laugh-speak",
+})
+
+_BRACKET_TAG_RE = _re.compile(r"\[([a-zA-Z][a-zA-Z\-]*)\]")
+_XML_TAG_RE = _re.compile(r"<\s*(/?)\s*([a-zA-Z][a-zA-Z\-]*)\s*[^>]*?(/?)\s*>")
+# Markdown emphasis to strip (keep inner text). Avoid \\* characters in code points.
+_MD_BOLD_RE = _re.compile(r"\*\*([^*\n]+?)\*\*")
+_MD_ITALIC_RE = _re.compile(r"(?<![\\*])\*([^*\n]+?)\*(?!\*)")
+_MD_BOLD_U_RE = _re.compile(r"__([^_\n]+?)__")
+_MD_ITALIC_U_RE = _re.compile(r"(?<![\w_])_([^_\n]+?)_(?![\w_])")
+
+
+def _sanitize_tts_tags(text: str) -> str:
+    """Defensive scrub for malformed Grok output before sending to xAI TTS.
+
+    Fixes the recurring failure modes seen in production logs:
+      1. Markdown emphasis (`*foo*`, `**foo**`, `_foo_`, `__foo__`) — strip the markers, keep text.
+      2. Bracket-form of wrapping tags (`[soft]`, `[whisper]`, `[loud]`, etc.) — drop them
+         (xAI would speak the tag name as a word).
+      3. Unknown bracket tokens that aren't valid inline tags — drop.
+      4. Balance wrapping tags: drop orphan closing tags, auto-close orphan opening tags.
+    Inline tags + valid wrapping pairs pass through unchanged.
+    """
+    if not text:
+        return ""
+
+    # 1. Strip markdown emphasis markers
+    text = _MD_BOLD_RE.sub(r"\1", text)
+    text = _MD_ITALIC_RE.sub(r"\1", text)
+    text = _MD_BOLD_U_RE.sub(r"\1", text)
+    text = _MD_ITALIC_U_RE.sub(r"\1", text)
+
+    # 2 & 3. Replace bracket tokens: keep valid inline tags as-is, drop everything else
+    def _bracket_repl(m: "_re.Match[str]") -> str:
+        name = m.group(1).lower()
+        if name in INLINE_TTS_TAGS:
+            return f"[{name}]"
+        return ""  # drop misused bracket tokens — silent rather than spoken
+    text = _BRACKET_TAG_RE.sub(_bracket_repl, text)
+
+    # 4. Walk XML tags, balance wrapping pairs, drop orphans
+    out: list[str] = []
+    stack: list[str] = []
+    pos = 0
+    for m in _XML_TAG_RE.finditer(text):
+        out.append(text[pos:m.start()])
+        is_close = m.group(1) == "/"
+        name = m.group(2).lower()
+        is_self_close = m.group(3) == "/"
+
+        if name not in WRAPPING_TTS_TAGS:
+            # Unknown XML tag — drop silently (rather than read aloud)
+            pos = m.end()
+            continue
+
+        if is_self_close:
+            # Self-closing wrapping tag is meaningless — drop
+            pos = m.end()
+            continue
+
+        if is_close:
+            if name in stack:
+                # Auto-close any inner tags first (reverse-order)
+                while stack and stack[-1] != name:
+                    out.append(f"</{stack.pop()}>")
+                # Now pop the matching one
+                if stack and stack[-1] == name:
+                    out.append(f"</{stack.pop()}>")
+            # else: orphan closing — drop silently
+        else:
+            # Opening tag
+            if name in stack:
+                # Already open — drop the duplicate open (no nesting same tag)
+                pass
+            else:
+                stack.append(name)
+                out.append(f"<{name}>")
+        pos = m.end()
+    out.append(text[pos:])
+
+    # Auto-close any leftover open wrapping tags
+    while stack:
+        out.append(f"</{stack.pop()}>")
+
+    # Cleanup: collapse extra spaces left by tag drops
+    result = "".join(out)
+    result = _re.sub(r"[ \t]{2,}", " ", result)
+    result = _re.sub(r"\s+([,.!?;:])", r"\1", result)  # drop space before punctuation
+    return result.strip()
 
 
 async def enhance_speech_text(
@@ -133,8 +257,12 @@ async def enhance_speech_text(
         enhanced = enhanced.strip("`").strip()
     if (enhanced.startswith('"') and enhanced.endswith('"')) or (enhanced.startswith("'") and enhanced.endswith("'")):
         enhanced = enhanced[1:-1].strip()
-    # Defensive scrub in case Grok still echoes header-style metadata
+    # Defensive scrubs against the recurring failure modes we see in production:
+    # 1. Header-style metadata leak (Voice:/Language:/Direction:/Text:)
+    # 2. Markdown emphasis (*foo*, **foo**), bracket-form wrapping tags ([loud]),
+    #    orphan/unbalanced wrapping tags — all of which xAI TTS would speak literally
     enhanced = _strip_leaked_metadata(enhanced)
+    enhanced = _sanitize_tts_tags(enhanced)
     _ = (voice, language)  # acknowledged but intentionally not sent to Grok
     return enhanced, round(time.time() - start, 2)
 
