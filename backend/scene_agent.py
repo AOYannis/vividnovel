@@ -68,6 +68,24 @@ says the character changed clothes ("she takes off the corset", "she puts on a c
 If no locked clothing is provided yet (first time the character is on screen), invent
 an outfit that fits the setting and the character.
 
+# Appearance continuity — CRITICAL
+If a "Locked appearance" block is provided for a character, use those head-and-shoulders
+features VERBATIM (hair length / cut / colour / texture, eye colour, skin tone, age,
+ethnicity, signature features). Don't paraphrase, don't substitute synonyms ("short bob"
+≠ "pixie cut" ≠ "cropped hair"). The only exception is when scene_summary explicitly
+describes a change ("hair now wet", "face flushed", "fresh makeup", "tear streaks") —
+in that case keep the locked baseline AND add the situational change on top.
+
+# Time of day & lighting — CRITICAL
+When a "Time of day" is provided (morning / afternoon / evening / night), the lighting
+MUST match it. Z-Image Turbo defaults to bright daylight if not told otherwise.
+- night → candlelight, warm bedside lamp, neon glow, moonlight, streetlamp through window
+- evening → warm sunset, golden hour, low amber lamps, dusk through curtains
+- morning → cool diffused dawn, soft window light, pale daylight
+- afternoon → bright natural daylight, sunlit interior
+NEVER write "sunlit" / "bright daylight" / "morning light" for an evening or night scene.
+The lighting style you pick (Layer 3) MUST be consistent with the time of day.
+
 # Trigger words (LoRA tokens)
 - If a TRIGGER word is provided for a character, place it AT THE VERY START of the prompt,
   followed by a comma — Z-Image weights prompt prefixes more heavily and the LoRA needs
@@ -149,6 +167,29 @@ def _format_clothing_block(actors_present: list[str], clothing_state: dict[str, 
     return "\n".join(lines)
 
 
+def _format_appearance_block(actors_present: list[str], appearance_state: dict[str, str]) -> str:
+    """Per-actor head-and-shoulders lock. Captured from the first scene each
+    character appeared in. Stops drift on hair / face / skin / age across scenes.
+    """
+    if not appearance_state:
+        return ""
+    relevant = {code: appearance_state[code] for code in actors_present if code in appearance_state}
+    if not relevant:
+        return ""
+    lines = ["Locked appearance (use VERBATIM — same hair / face / eyes / skin / age):"]
+    for code, look in relevant.items():
+        lines.append(f"- `{code}`: {look}")
+    return "\n".join(lines)
+
+
+def _format_time_of_day_block(time_of_day: str | None) -> str:
+    """Single-line hint passed alongside the location. Specialist must pick a
+    lighting style that matches it (Z-Image defaults to bright daylight otherwise)."""
+    if not time_of_day:
+        return ""
+    return f"Time of day: **{time_of_day}** (the lighting in the prompt MUST match this — see system rules)."
+
+
 def _format_mood_block(mood_name: str | None, mood_data: dict | None) -> str:
     if not mood_name or mood_name == "neutral":
         return "Mood: `neutral` — no special framing or LoRA. Compose the shot freely."
@@ -179,6 +220,8 @@ async def craft_image_prompt(
     custom_setting_text: str,
     location_hint: str,
     clothing_state: dict[str, str] | None,
+    appearance_state: dict[str, str] | None,
+    time_of_day: str | None,
     language: str,
     player_gender: str,
     grok_model: str = "grok-4-1-fast-non-reasoning",
@@ -191,6 +234,8 @@ async def craft_image_prompt(
     actor_block = _format_actor_block(actors_present, actor_lookup)
     mood_block = _format_mood_block(mood_name, mood_data)
     clothing_block = _format_clothing_block(actors_present, clothing_state or {})
+    appearance_block = _format_appearance_block(actors_present, appearance_state or {})
+    time_block = _format_time_of_day_block(time_of_day)
 
     setting_line = setting_label or "(unspecified setting)"
     if custom_setting_text:
@@ -200,6 +245,7 @@ async def craft_image_prompt(
 
 Setting: {setting_line}
 Current location (canonical): {location_hint or '(unspecified)'}
+{time_block}
 Player gender: {player_gender}
 Story language: {language} (the prompt itself stays in ENGLISH)
 
@@ -211,6 +257,8 @@ Shot intent (camera/tone hint from the narrator):
 
 Characters visible in this image:
 {actor_block}
+
+{appearance_block}
 
 {clothing_block}
 
@@ -243,6 +291,58 @@ to a generic Parisian café when the setting says otherwise."""
 
     elapsed = round(time.time() - start, 2)
     return prompt, elapsed
+
+
+async def extract_appearance(
+    grok_client,
+    *,
+    codename: str,
+    image_prompt: str,
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+) -> str:
+    """Pull the head-and-shoulders description for one character out of an
+    already-crafted image prompt. Used to lock the look on first appearance so
+    later scenes don't drift the hair / face / skin / age details.
+
+    Returns a short comma-separated phrase suitable for re-injection (~30-80
+    words), or empty string on failure.
+    """
+    if not image_prompt or not codename:
+        return ""
+    sys_msg = (
+        "You extract the head-and-shoulders appearance of ONE character from a "
+        "Z-Image Turbo prompt. Output a short, dense, comma-separated phrase that "
+        "can be reused VERBATIM in future prompts to lock the look. Include only: "
+        "age, ethnicity / face type, hair (length, cut, colour, texture), eyes "
+        "(colour, shape, expression-neutral), skin (tone, marks like freckles), "
+        "any signature feature (jewellery on head, glasses, scar). EXCLUDE: "
+        "clothing, body pose, location, lighting, camera, mood, action verbs. "
+        "Output ONLY the phrase — no labels, no quotes, no commentary. If the "
+        "prompt does not describe the character clearly, output an empty string."
+    )
+    user_msg = (
+        f"Character codename: `{codename}`\n\n"
+        f"Image prompt to extract from:\n{image_prompt}\n\n"
+        f"Output the head-and-shoulders appearance phrase:"
+    )
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=grok_model,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.2,
+            max_tokens=160,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        # Strip wrapping quotes the model sometimes adds
+        if text.startswith(("'", '"')) and text.endswith(("'", '"')) and len(text) > 2:
+            text = text[1:-1].strip()
+        return text
+    except Exception as e:
+        print(f"[scene_agent] extract_appearance({codename}) failed: {e}")
+        return ""
 
 
 def _fallback_prompt(

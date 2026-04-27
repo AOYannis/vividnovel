@@ -199,6 +199,10 @@ class CharacterState:
     overrides: dict[str, str] = _field(default_factory=dict)  # "<day>_<slot>" → loc_id
     today_mood: str = ""                 # populated by daily tick (Phase 5, optional)
     intentions_toward_player: str = ""   # populated by daily tick
+    # How quickly this character opens up. Drives the narrative reaction cues
+    # injected into the relationships block — does NOT change LoRA gating.
+    # Valid values: "reserved" | "normal" | "wild". Defaults to "normal".
+    temperament: str = "normal"
 
     def as_dict(self) -> dict:
         return {
@@ -209,10 +213,14 @@ class CharacterState:
             "overrides": dict(self.overrides),
             "today_mood": self.today_mood,
             "intentions_toward_player": self.intentions_toward_player,
+            "temperament": self.temperament,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "CharacterState":
+        _temp = str(data.get("temperament", "normal")).strip().lower()
+        if _temp not in ("reserved", "normal", "wild"):
+            _temp = "normal"
         return cls(
             code=str(data.get("code", "")),
             personality=str(data.get("personality", "")),
@@ -221,6 +229,7 @@ class CharacterState:
             overrides=dict(data.get("overrides", {})),
             today_mood=str(data.get("today_mood", "")),
             intentions_toward_player=str(data.get("intentions_toward_player", "")),
+            temperament=_temp,
         )
 
     def schedule_for(self, day: int, slot: str) -> str:

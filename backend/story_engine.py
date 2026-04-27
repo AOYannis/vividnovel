@@ -30,8 +30,8 @@ from memory import (
 )
 from logger import SequenceLogger
 from davinci import DAVINCI_ENABLED, DAVINCI_TIMEOUT, generate_scene_video as davinci_generate, build_davinci_prompt
-from scene_agent import craft_image_prompt
-from mood_gate import gate_mood
+from scene_agent import craft_image_prompt, extract_appearance
+from mood_gate import gate_mood, infer_mood_from_summary
 from presence_gate import gate_presence
 
 
@@ -91,6 +91,11 @@ class ConsistencyTracker:
         # Lock: character display name → actor codename (first binding wins)
         # Prevents the agent from re-mapping "Camille" from `wh1te` to `nataly` mid-story
         self.character_actors: dict[str, str] = {}
+        # Locked head-and-shoulders appearance per actor codename. Captured from
+        # the first scene each actor appears in (via a tiny extractor call).
+        # Stops hair / face / skin drift across scenes. Soft lock — the narrator
+        # can override by saying "her hair is now wet" / etc. in scene_summary.
+        self.appearance: dict[str, str] = {}
 
     def update_from_tool_call(self, args: dict):
         loc = args.get("location_description", "")
@@ -146,6 +151,7 @@ class ConsistencyTracker:
             "prompt_overrides": dict(self.prompt_overrides),
             "secondary_characters": dict(self.secondary_characters),
             "character_actors": dict(self.character_actors),
+            "appearance": dict(self.appearance),
         }
 
 
@@ -645,6 +651,17 @@ class StoryEngine:
                                 args["character_names"] = _names
                                 args["actors_present"] = actors_present
 
+                            # Auto-promote: if narrator picked `neutral` but the
+                            # scene_summary clearly says "missionary" / "kiss" / etc.,
+                            # lift the mood to the matching position. Catches the
+                            # over-cautious narrator that defaults to neutral while
+                            # writing explicit prose.
+                            promoted = infer_mood_from_summary(scene_summary, requested_mood)
+                            if promoted:
+                                print(f"[mood_gate] scene {image_index}: auto-promoted "
+                                      f"{requested_mood!r} → {promoted!r} from scene_summary")
+                                requested_mood = promoted
+
                             # Phase 3C: server-side mood gate (relationship-level rule).
                             mood_name, mood_downgraded = gate_mood(
                                 requested_mood, actors_present, session.relationships
@@ -690,6 +707,13 @@ class StoryEngine:
                                 if _cl:
                                     merged_clothing[_ac] = _cl
 
+                            # Locked head/shoulders appearance from prior scenes.
+                            appearance_state = dict(session.consistency.appearance or {})
+
+                            # Time of day from world.slot — the specialist needs it to
+                            # pick lighting that doesn't default to bright daylight.
+                            tod = session.world.slot if session.world else None
+
                             crafted_prompt, craft_elapsed = await craft_image_prompt(
                                 self.grok,
                                 scene_index=image_index,
@@ -703,10 +727,31 @@ class StoryEngine:
                                 custom_setting_text=session.custom_setting_text or "",
                                 location_hint=location_hint,
                                 clothing_state=merged_clothing,
+                                appearance_state=appearance_state,
+                                time_of_day=tod,
                                 language=session.language or "fr",
                                 player_gender=(session.player or {}).get("gender", "male"),
                                 grok_model=session.grok_model,
                             )
+
+                            # Capture appearance for any cast member appearing for the
+                            # FIRST time. Fire-and-forget: a per-actor extractor call
+                            # so subsequent scenes can lock the look. Skipped on retry
+                            # if the extractor fails / returns empty.
+                            for _ac in actors_present:
+                                if _ac and _ac not in session.consistency.appearance:
+                                    try:
+                                        _look = await extract_appearance(
+                                            self.grok,
+                                            codename=_ac,
+                                            image_prompt=crafted_prompt,
+                                            grok_model=session.grok_model,
+                                        )
+                                        if _look:
+                                            session.consistency.appearance[_ac] = _look
+                                            print(f"[appearance] locked {_ac}: {_look[:80]}")
+                                    except Exception as _e:
+                                        print(f"[appearance] extract for {_ac} failed: {_e}")
 
                             # Inject specialist output back into args so downstream
                             # code (consistency tracker, _generate_image, frontend
@@ -728,9 +773,13 @@ class StoryEngine:
                                 args.get("secondary_characters", {}),
                             )
 
-                            # Update relationship progress for actors in the scene
+                            # Update relationship progress for actors in the scene.
+                            # Use the REQUESTED (post-promotion) mood, not the post-gate
+                            # one — otherwise trust never grows when the gate is active
+                            # (Catch-22: gate downgrades to neutral, level stays at 1,
+                            # next scene still gated, infinite loop).
                             rel_actors = actors_present
-                            scene_moods = args["style_moods"]
+                            rel_moods = [requested_mood]
                             for actor_code in rel_actors:
                                 if actor_code not in session.relationships:
                                     session.relationships[actor_code] = {
@@ -739,17 +788,17 @@ class StoryEngine:
                                     }
                                 rel = session.relationships[actor_code]
                                 rel["scenes"] += 1
-                                rel["last_mood"] = scene_moods[0] if scene_moods else "neutral"
+                                rel["last_mood"] = rel_moods[0] if rel_moods else "neutral"
                                 # Bump level based on mood
                                 _intimate_moods = {"explicit_mystic", "blowjob", "blowjob_closeup", "cunnilingus",
                                                    "cunnilingus_from_behind", "missionary", "cowgirl",
                                                    "reverse_cowgirl", "doggystyle", "spooning", "standing_sex",
                                                    "anal_doggystyle", "anal_missionary", "anal_missionary_shemale",
                                                    "cumshot_face", "titjob", "handjob"}
-                                if any(m in _intimate_moods for m in scene_moods):
+                                if any(m in _intimate_moods for m in rel_moods):
                                     rel["intimate_scenes"] += 1
                                     rel["level"] = max(rel["level"], 4)
-                                elif "sensual_tease" in scene_moods:
+                                elif "sensual_tease" in rel_moods or "kiss" in rel_moods:
                                     rel["level"] = max(rel["level"], min(rel["level"] + 1, 3), 2)
                                 else:
                                     rel["level"] = max(rel["level"], 1)

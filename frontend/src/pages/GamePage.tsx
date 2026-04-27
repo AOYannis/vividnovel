@@ -382,9 +382,9 @@ export default function GamePage() {
             <button
               onClick={() => setMapOpen(true)}
               className="text-[10px] font-mono px-2.5 py-1.5 rounded-full transition-colors backdrop-blur-sm bg-emerald-950/50 text-emerald-300 hover:bg-emerald-900/60 border border-emerald-900/40"
-              title="Carte des lieux"
+              title={t('map.title_modal')}
             >
-              ⌖ J{world.day} · {{morning: 'matin', afternoon: 'après-midi', evening: 'soir', night: 'nuit'}[world.slot] || world.slot} · {world.locations.find((l) => l.id === world.current_location)?.name || world.current_location}
+              ⌖ {t('map.agenda_day_short')}{world.day} · {t(`map.slot.${world.slot}`)} · {world.locations.find((l) => l.id === world.current_location)?.name || world.current_location}
             </button>
           </>
         )}
@@ -492,10 +492,10 @@ export default function GamePage() {
           // narration starts fresh.
           resetForNewSequence()
           // Synthetic choice text the backend uses to detect a deliberate
-          // free-roam move ("Aller ailleurs"). The slice-of-life prompt branches
-          // on this to enforce alone-by-default at the new destination.
+          // free-roam move. The slice-of-life prompt branches on the prefix to
+          // enforce alone-by-default at the new destination.
           const newLoc = newWorld.locations.find((l) => l.id === newWorld.current_location)
-          const moveText = `Aller ailleurs : ${newLoc?.name || newWorld.current_location}`
+          const moveText = `${t('map.move_choice_prefix')} : ${newLoc?.name || newWorld.current_location}`
           startSequence('move', moveText)
         }}
       />

@@ -57,6 +57,7 @@ Produce a JSON object with this EXACT shape (no extra keys, no markdown):
 {{
   "personality": "<one sentence, max 120 chars, traits + vibe>",
   "job": "<one short noun phrase: occupation/role, max 60 chars>",
+  "temperament": "<reserved | normal | wild — drives how quickly they open up to the player; reserved = slow, wild = fast>",
   "schedule": {{
     "weekday_morning":   "<location_id | a|b | free>",
     "weekday_afternoon": "<location_id | a|b | free>",
@@ -142,11 +143,15 @@ async def generate_character_state(
         print(f"[agent] generate_character_state({code}) failed: {e}; using empty defaults")
         data = {}
 
+    _temp = str(data.get("temperament", "")).strip().lower()
+    if _temp not in ("reserved", "normal", "wild"):
+        _temp = "normal"
     return CharacterState(
         code=code,
         personality=str(data.get("personality", "")).strip()[:200],
         job=str(data.get("job", "")).strip()[:80],
         schedule=_coerce_schedule(data.get("schedule", {}), valid_ids),
+        temperament=_temp,
     )
 
 
@@ -179,6 +184,7 @@ async def generate_world_and_agents(
     custom_setting_text: str,
     cast_actors: list[tuple[str, dict]],
     grok_model: str = "grok-4-1-fast-non-reasoning",
+    language: str = "fr",
 ) -> tuple[list[Location], dict[str, CharacterState]]:
     """ONE Grok call that produces:
       1. A setting-themed location set (5-7 locations with themed names + IDs).
@@ -202,16 +208,34 @@ async def generate_world_and_agents(
     )
     cast_codes_str = ", ".join(f"`{code}`" for code, _ in cast_actors)
 
-    setting_blurb = setting_label
+    # When the user supplied a custom setting, it DOMINATES — the canned setting
+    # label is just a fallback. Mixing both ("Paris contemporain — New York 2026")
+    # made the LLM generate Paris-themed locations even when the user wanted NYC.
     if custom_setting_text:
-        setting_blurb += f" — {custom_setting_text[:300]}"
+        setting_blurb = custom_setting_text[:400]
+    else:
+        setting_blurb = setting_label
+
+    # Language for location names + descriptions. The user's narration language is
+    # the truth — generating French location names for an English game broke
+    # immersion (and confused Grok later when it had to use them in narration).
+    lang_label = {
+        "fr": "French", "en": "English", "es": "Spanish", "de": "German",
+        "it": "Italian", "pt": "Portuguese", "ja": "Japanese", "ko": "Korean",
+        "zh": "Chinese", "ru": "Russian", "ar": "Arabic", "tr": "Turkish",
+        "nl": "Dutch", "pl": "Polish", "hi": "Hindi",
+    }.get(language, "French")
 
     sys_msg = (
         "You design a tiny lived-in world for an adult slice-of-life game: a setting-themed "
         "location set + the daily routines of a small cast. Output strict JSON. Keep names "
         "and descriptions immersive in the chosen setting (pirate game = pirate names, "
         "futurist game = futurist names, etc.). Do NOT use generic placeholder names from "
-        "other settings."
+        "other settings.\n\n"
+        f"⚠️ CRITICAL: write all `name` and `description` fields in **{lang_label}** "
+        f"(this is the player's language). Use names that fit the setting AND the language "
+        f"(e.g. for a New York setting in English: 'Your apartment, Brooklyn' not 'Ton appart, "
+        f"Brooklyn'). Setting determines the THEME; language determines the WORDING."
     )
 
     user_msg = f"""Setting: {setting_blurb}
@@ -229,6 +253,7 @@ Produce a JSON object with this EXACT shape (no markdown, no extra keys):
     "<character_codename>": {{
       "personality": "<one short sentence — traits + vibe>",
       "job": "<one short noun phrase>",
+      "temperament": "<reserved | normal | wild — see TEMPERAMENT block>",
       "schedule": {{
         "weekday_morning":   "<location_id | a|b | free>",
         "weekday_afternoon": "<...>",
@@ -242,6 +267,12 @@ Produce a JSON object with this EXACT shape (no markdown, no extra keys):
     }}
   }}
 }}
+
+TEMPERAMENT — pick ONE per character (drives how quickly they open up to the player):
+- `reserved`: slow to warm up, requires real seduction effort, refuses early advances. ~20-30% of cast.
+- `normal`: standard pace, neither cold nor instantly available. ~50-60% of cast.
+- `wild`: open, flirty, escalates quickly when interest is mutual. ~10-20% of cast.
+Pick a MIX across the cast — never make all characters the same temperament.
 
 LOCATIONS — exactly 6 locations, with these CONSTRAINTS:
 - INCLUDE one location with id "home" and type "home" — this is the PLAYER's home.
@@ -333,11 +364,15 @@ Output only the JSON, no commentary."""
             # Filter against valid IDs AND strip 'home' (player-only)
             kept = [p for p in parts if p in valid_loc_ids_no_home]
             sched[slot] = "|".join(kept) if kept else "free"
+        _temp = str(raw.get("temperament", "")).strip().lower()
+        if _temp not in ("reserved", "normal", "wild"):
+            _temp = "normal"
         states[code] = CharacterState(
             code=code,
             personality=str(raw.get("personality", "")).strip()[:200],
             job=str(raw.get("job", "")).strip()[:80],
             schedule=sched,
+            temperament=_temp,
         )
 
     # Strict deconflict pass (defence in depth — Grok should already comply)

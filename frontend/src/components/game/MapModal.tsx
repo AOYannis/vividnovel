@@ -1,14 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchWorld, goToLocation } from '../../api/client'
 import { useGameStore } from '../../stores/gameStore'
+import { useT } from '../../i18n'
 import type { Location, WorldState, WorldSlot, KnownWhereabout } from '../../api/types'
-
-const SLOT_LABEL: Record<WorldSlot, string> = {
-  morning: 'matin',
-  afternoon: 'après-midi',
-  evening: 'soir',
-  night: 'nuit',
-}
 
 const SLOT_ICON: Record<WorldSlot, string> = {
   morning: '☀',
@@ -54,6 +48,13 @@ interface MapModalProps {
 }
 
 export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
+  const t = useT()
+  const SLOT_LABEL: Record<WorldSlot, string> = {
+    morning: t('map.slot.morning'),
+    afternoon: t('map.slot.afternoon'),
+    evening: t('map.slot.evening'),
+    night: t('map.slot.night'),
+  }
   const world = useGameStore((s) => s.world)
   const sessionId = useGameStore((s) => s.sessionId)
   const characterStates = useGameStore((s) => s.characterStates)
@@ -77,8 +78,8 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
     return (
       <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center" onClick={onClose}>
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 text-neutral-400 text-sm">
-          Slice-of-life mode is not active for this session.
-          <button onClick={onClose} className="block mt-3 text-amber-500 hover:text-amber-400">Close</button>
+          {t('map.not_active')}
+          <button onClick={onClose} className="block mt-3 text-amber-500 hover:text-amber-400">{t('map.close')}</button>
         </div>
       </div>
     )
@@ -126,15 +127,15 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
         {/* Header */}
         <div className="sticky top-0 bg-neutral-950/95 backdrop-blur-sm border-b border-neutral-800 px-4 py-3 flex items-center justify-between">
           <div>
-            <div className="text-xs text-neutral-500 uppercase tracking-wider">Carte</div>
+            <div className="text-xs text-neutral-500 uppercase tracking-wider">{t('map.title')}</div>
             <div className="text-sm text-neutral-200 font-mono">
-              Jour {world.day} · {SLOT_ICON[world.slot]} {SLOT_LABEL[world.slot]}
+              {t('map.day')} {world.day} · {SLOT_ICON[world.slot]} {SLOT_LABEL[world.slot]}
             </div>
           </div>
           <button
             onClick={onClose}
             className="text-neutral-500 hover:text-neutral-200 text-2xl leading-none px-2"
-            aria-label="Fermer"
+            aria-label={t('map.close')}
           >
             ×
           </button>
@@ -143,7 +144,7 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
         {/* Locations */}
         <div className="p-4 space-y-2">
           <p className="text-[11px] text-neutral-500 mb-3">
-            Choisis un lieu où aller. Le temps avance d'un cran : prochain moment ={' '}
+            {t('map.pick_location')}{' '}
             <span className="text-amber-400">{SLOT_LABEL[upcomingSlot]}</span>.
           </p>
           {world.locations.map((loc) => {
@@ -167,12 +168,12 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
                       {loc.name}
-                      {isCurrent && <span className="text-[9px] uppercase tracking-wider text-amber-500">tu es ici</span>}
+                      {isCurrent && <span className="text-[9px] uppercase tracking-wider text-amber-500">{t('map.you_are_here')}</span>}
                       {charsHere.map((c) => (
                         <span
                           key={c}
                           className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-800/40 font-mono"
-                          title={`${shortName(c, characterNames)} est probablement ici en ce moment`}
+                          title={`${shortName(c, characterNames)} ${t('map.character_here_tooltip')}`}
                         >
                           {shortName(c, characterNames)}
                         </span>
@@ -198,12 +199,12 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
         {futureWhereabouts.length > 0 && (
           <div className="px-4 pb-4">
             <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1.5">
-              Agenda — ce qu'on t'a dit
+              {t('map.agenda_title')}
             </div>
             <div className="space-y-1.5">
               {futureWhereabouts.map((w, i) => {
                 const loc = world.locations.find((l) => l.id === w.location_id)
-                const dayLabel = w.day === world.day ? "aujourd'hui" : `J${w.day}`
+                const dayLabel = w.day === world.day ? t('map.agenda_today') : `${t('map.agenda_day_short')}${w.day}`
                 return (
                   <div
                     key={`${w.char}-${w.day}-${w.slot}-${w.location_id}-${i}`}
@@ -229,13 +230,13 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
         {/* Recent history */}
         {world.history && world.history.length > 0 && (
           <div className="px-4 pb-4">
-            <div className="text-[10px] text-neutral-600 uppercase tracking-wider mb-1">Récents</div>
+            <div className="text-[10px] text-neutral-600 uppercase tracking-wider mb-1">{t('map.history_title')}</div>
             <div className="text-[11px] text-neutral-500 font-mono space-y-0.5">
               {world.history.slice(-5).reverse().map((h, i) => {
                 const loc = world.locations.find((l) => l.id === h.location)
                 return (
                   <div key={i}>
-                    J{h.day} · {SLOT_LABEL[h.slot]} · {loc?.name || h.location}
+                    {t('map.agenda_day_short')}{h.day} · {SLOT_LABEL[h.slot]} · {loc?.name || h.location}
                   </div>
                 )
               })}

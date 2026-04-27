@@ -244,8 +244,11 @@ def _section_cast(
     text = (
         "## Casting\n"
         + intro_paragraph +
-        "Donne à chaque personnage un PRÉNOM local cohérent avec le cadre (pas le codename). "
+        "INVENTE un prénom local pour chaque personnage, cohérent avec le cadre. "
+        "N'utilise JAMAIS le codename comme prénom de scène (ce sont des tokens techniques : "
+        "`nesra`, `white_short`, `blonde_cacu` ne sont PAS des prénoms). "
         "Dans `generate_scene_image.actors_present`, utilise TOUJOURS le codename. "
+        "Dans `generate_scene_image.character_names`, déclare le prénom inventé pour verrouiller la correspondance. "
         "Pas d'auto-référence média : si un personnage est tiré d'un univers connu, ne nomme "
         "pas l'univers ni le personnage d'origine — réinvente le prénom et décris-le avec tes mots.\n\n"
         "### Personnages\n"
@@ -263,7 +266,7 @@ def _section_cast(
             hint = ", ".join(p for p in (cs.personality, cs.job) if p) or "—"
         else:
             hint = (actor_data.get("description") or "").split(",")[0].strip() or "—"
-        text += f"- `{code}`{flag_str} — {hint}\n"
+        text += f"- codename `{code}`{flag_str} — {hint}\n"
     if any(actor_genders.get(c) == "trans" for c, _ in cast_actors):
         text += (
             "\n⚠️ Personnages [trans] : femmes avec pénis. En narration, traite-les comme des femmes "
@@ -273,7 +276,10 @@ def _section_cast(
     return text
 
 
-def _section_relationships(relationships: dict | None) -> str | None:
+def _section_relationships(
+    relationships: dict | None,
+    character_states: dict | None = None,
+) -> str | None:
     if not relationships:
         return None
     _level_labels = {
@@ -284,24 +290,59 @@ def _section_relationships(relationships: dict | None) -> str | None:
         4: "INTIMATE (a déjà eu des moments physiques, relation établie)",
         5: "LOVER (relation établie, intimité régulière)",
     }
-    lines = ["## ÉTAT DES RELATIONS (très important pour le rythme)\n"]
+    lines = ["## ÉTAT DES RELATIONS — guide ce que les personnages ACCEPTENT\n"]
     for code, rel in relationships.items():
         level = rel.get("level", 0)
         encounters = rel.get("encounters", 0)
         scenes = rel.get("scenes", 0)
         label = _level_labels.get(level, "stranger")
-        lines.append(f"- **{code}** : {label} — {encounters} séquences, {scenes} scènes")
+        cs = (character_states or {}).get(code) if character_states else None
+        temperament = (getattr(cs, "temperament", "normal") if cs else "normal") or "normal"
+        cue = _reaction_cue(level, temperament)
+        lines.append(
+            f"- **{code}** : {label} · tempérament `{temperament}` — {encounters} séquences, {scenes} scènes\n"
+            f"  Réaction probable : {cue}"
+        )
     lines.append(
-        "\n⚠️ Le runtime applique le mood gating : un mood trop explicite pour le niveau actuel "
-        "est rétrogradé automatiquement. Pour rester cohérent, suis cette progression dans la narration "
-        "ET dans le mood :\n"
-        "- STRANGER/ACQUAINTANCE → conversation, regards, flirt léger ; mood `neutral`.\n"
-        "- FLIRTING → contacts légers, premier baiser ; `neutral` / `sensual_tease` / `kiss`.\n"
-        "- CLOSE → intimité émotionnelle, premiers moments charnels ; explicites possibles si la situation y mène.\n"
-        "- INTIMATE/LOVER → tous les moods autorisés.\n"
-        "\nLa relation NE PEUT PAS sauter de niveau en une séquence."
+        "\n⚠️ Utilise ces réactions comme MOTEUR NARRATIF, pas comme contrainte technique : "
+        "si le joueur tente quelque chose au-dessus du niveau actuel, fais-la HÉSITER, RECULER, "
+        "REFUSER GENTIMENT, ou poser des conditions — c'est ce qui crée la tension de la séduction. "
+        "L'intimité s'EARN ; elle ne se commande pas. La relation peut MONTER (geste tendre, écoute, "
+        "moment partagé) ou STAGNER (avance maladroite, indifférence). Elle ne saute jamais 2 niveaux "
+        "en une séquence."
     )
     return "\n".join(lines)
+
+
+# Reaction cues per (level × temperament). Compact, narrative-driven — tells the
+# narrator HOW the character would react to advances at this trust level.
+_REACTION_CUES: dict[tuple[int, str], str] = {
+    (0, "reserved"): "très distante, observe à peine, refuserait tout contact ; un regard appuyé suffit à la mettre en retrait.",
+    (0, "normal"):   "polie mais sur ses gardes, parle peu, accepterait au mieux une banalité ; aucun contact physique.",
+    (0, "wild"):     "intriguée, regards directs, accepterait un compliment audacieux ou une plaisanterie — mais pas plus.",
+    (1, "reserved"): "commence à se laisser apprivoiser, parle si on l'écoute ; un effleurement la ferait reculer.",
+    (1, "normal"):   "à l'aise pour bavarder, sourires faciles ; un baiser serait prématuré et probablement refusé.",
+    (1, "wild"):     "joueuse, frôle volontiers ; accepterait peut-être un baiser si l'instant est juste — pas davantage.",
+    (2, "reserved"): "s'autorise des regards plus longs, un rire complice ; un baiser doux est possible si le moment s'y prête, jamais imposé.",
+    (2, "normal"):   "tension sexuelle assumée, contacts légers (bras, main) ; un baiser oui, du déshabillage non.",
+    (2, "wild"):     "embrasse facilement, se laisse caresser par-dessus les vêtements ; pousserait elle-même vers plus si rien ne la freine.",
+    (3, "reserved"): "intimité émotionnelle, baisers profonds, premières caresses ; le passage au sexe demande un déclic clair.",
+    (3, "normal"):   "à l'aise dans l'intimité, baisers profonds, déshabillage partiel possible ; le sexe arrive si la situation s'y prête.",
+    (3, "wild"):     "déshabillage rapide, sexe possible dès que le contexte le permet — initie souvent.",
+    (4, "reserved"): "s'abandonne enfin, intimité physique pleine ; reste tendre et présente émotionnellement.",
+    (4, "normal"):   "intimité physique complète, à l'aise avec tous les actes consensuels.",
+    (4, "wild"):     "très libre sexuellement, propose, varie, prend l'initiative.",
+    (5, "reserved"): "amante établie ; intimité régulière mais toujours teintée de douceur et d'attention.",
+    (5, "normal"):   "amante établie ; intimité régulière, complicité forte.",
+    (5, "wild"):     "amante désinhibée ; explore, propose, joue.",
+}
+
+
+def _reaction_cue(level: int, temperament: str) -> str:
+    """Return a short reaction guidance line for (level × temperament)."""
+    temp = temperament if temperament in ("reserved", "normal", "wild") else "normal"
+    lvl = max(0, min(5, int(level or 0)))
+    return _REACTION_CUES.get((lvl, temp), "—")
 
 
 def _section_pool_actors(cast_actors: list[tuple[str, dict]]) -> str | None:
@@ -358,11 +399,13 @@ def _section_mood_enum(style_moods: dict | None) -> str:
     return (
         "## Mood (champ `mood` — UN seul nom)\n"
         f"Valeurs : {', '.join('`' + n + '`' for n in mood_names)}.\n"
-        "Choisis le mood SPÉCIFIQUE qui colle à ce qui se passe (position, intimité). "
-        "`neutral` par défaut. Le runtime applique le gating relation : un mood explicite sur un "
-        "STRANGER/ACQUAINTANCE est rétrogradé automatiquement — vise la cohérence avec l'État des "
-        "relations. Pour un personnage trans habillé, traite-le comme n'importe qui (`neutral`/"
-        "`sensual_tease`/`kiss`) — `futa_shemale` est UNIQUEMENT pour une révélation nue."
+        "**Choisis TOUJOURS le mood spécifique qui colle à ce qui se passe** : si la scène est "
+        "un baiser, mets `kiss` ; si c'est une fellation, mets `blowjob` ; si c'est missionnaire, "
+        "mets `missionary` ; etc. Chaque mood active un LoRA spécialisé — rester sur `neutral` "
+        "pour une scène explicite produit une image générique sans rendu anatomique. "
+        "`neutral` UNIQUEMENT pour les scènes non-sexuelles (conversation, marche, atmosphère). "
+        "Pour un personnage trans habillé, traite-le comme n'importe qui (`neutral` / "
+        "`sensual_tease` / `kiss`) — `futa_shemale` est UNIQUEMENT pour une révélation nue."
     )
 
 
@@ -593,7 +636,10 @@ def _slice_sequence_context(
         history_lines.append(f"- Jour {h.get('day', '?')} · {h_slot_fr} : {h_name}")
     history_block = "\n".join(history_lines) if history_lines else "- (premier déplacement)"
 
-    moved_via_map = bool(previous_choice and "ailleurs" in previous_choice.lower())
+    # The frontend sends a localized "go elsewhere : <loc>" string for map-driven
+    # moves. Detect by either FR or EN marker so the rule fires regardless of language.
+    _pc_lower = (previous_choice or "").lower()
+    moved_via_map = bool(previous_choice and ("ailleurs" in _pc_lower or "elsewhere" in _pc_lower))
 
     out = (
         f"## ⌖ LIEU ET MOMENT — RÈGLE PRIORITAIRE\n"
@@ -684,6 +730,145 @@ def _slice_sequence_context(
         f"⚠️ Mood gating : respecte les relations actuelles."
     )
     return out
+
+
+def _build_slice_intro_prompt(
+    *,
+    player: dict,
+    setting_id: str,
+    custom_instructions: str,
+    custom_setting_text: str,
+    style_moods: dict | None,
+    language: str,
+    world,
+) -> str:
+    """First-sequence intro prompt — atmospheric tour of the starting location
+    that hints (via PROPS / DETAILS) at the OTHER world locations the player
+    can visit. No cast, no dialogue with anyone — pure world-establishing.
+
+    The 4 end-of-sequence choices map to the 4 most evocative locations from
+    the world. Used only for sequence 0; later quiet beats use the shorter
+    `_build_slice_solo_prompt` instead.
+    """
+    lang_config = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES["fr"])
+    setting = SETTINGS.get(setting_id)
+    loc = world.location_by_id(world.current_location)
+    loc_name = loc.name if loc else world.current_location or "?"
+    loc_desc = loc.description if loc else ""
+    loc_type = loc.type if loc else ""
+    slot_fr = {"morning": "matin", "afternoon": "après-midi", "evening": "soir", "night": "nuit"}.get(world.slot, world.slot)
+
+    # Other locations (not the starting one) — these are what the props hint at.
+    other_locs = [l for l in (world.locations or []) if l.id != world.current_location]
+
+    sections: list[str] = []
+    sections.append(_section_role())
+
+    # Location anchor + intro framing
+    sections.append(
+        f"## ⌖ TU ES ICI, MAINTENANT — RÈGLE PRIORITAIRE\n"
+        f"\n"
+        f"**Jour {world.day} · {slot_fr} · {loc_name}**\n"
+        f"({loc_desc}, type: {loc_type})\n"
+        f"\n"
+        f"⚠️ Le joueur est SEUL ici. Toute la séquence se déroule À CET ENDROIT — "
+        f"ne change PAS de lieu pendant les 8 scènes. Pas de bar, pas de taverne, "
+        f"pas de speakeasy : `{loc_name}` ({loc_type})."
+    )
+
+    # The novel intro framing
+    sections.append(
+        "## Mode INTRO — séquence d'ouverture\n"
+        "\n"
+        "C'est la TOUTE PREMIÈRE séquence du jeu. Le joueur vient juste d'arriver / de rentrer ici.\n"
+        "Pas de personnages, pas de dialogue avec quelqu'un, pas de PNJ inventés. Cette séquence\n"
+        "est un MONOLOGUE INTÉRIEUR / une déambulation silencieuse pendant laquelle le joueur\n"
+        "redécouvre son propre lieu et, à travers des OBJETS et DÉTAILS PHYSIQUES qu'il y voit,\n"
+        "se rappelle des LIEUX qu'il fréquente dans sa vie.\n"
+        "\n"
+        "### Les 8 scènes — un tour du quotidien\n"
+        "Chaque scène focalise sur UN OBJET ou UN DÉTAIL spécifique de ce lieu :\n"
+        "- Un objet posé, une carte sur le frigo, une notification qui s'allume, un livre ouvert,\n"
+        "  un vêtement laissé sur une chaise, le reflet dans la vitre, un ticket dans la poche…\n"
+        "- L'objet ÉVOQUE un lieu de la vie du joueur (sans le nommer techniquement) — par\n"
+        "  l'association libre, le souvenir, la pensée fugace.\n"
+        "- Reste ATMOSPHÉRIQUE : pas d'événement dramatique, pas d'arrivée surprise, pas de\n"
+        "  coup de fil avec un personnage. C'est une scène de retour au calme.\n"
+        "- Varie les types d'images : un plan large du lieu, des gros plans d'objets, "
+        "  des détails de matière.\n"
+    )
+
+    # World locations the props should hint at
+    if other_locs:
+        loc_lines = []
+        for l in other_locs:
+            loc_lines.append(f"- `{l.id}` ({l.type}) — **{l.name}** : {l.description}")
+        sections.append(
+            "## Lieux de la vie du joueur (à évoquer SANS les nommer techniquement)\n"
+            "\n"
+            "Ces endroits font partie de son quotidien. Place dans la séquence des objets / "
+            "détails qui les ÉVOQUENT — l'esprit du joueur fait le lien.\n"
+            "\n"
+            + "\n".join(loc_lines) +
+            "\n\nExemples d'évocation crédibles (à adapter au cadre — laptop si moderne, lettre "
+            "si XIXᵉ, parchemin si pirate…) :\n"
+            "- `gym/yoga` → tapis roulé près de l'entrée, carte de membre, bouteille d'eau réutilisable\n"
+            "- `cafe/bar` → ticket de caisse froissé, pochette d'allumettes, sticker sur le frigo\n"
+            "- `work` → laptop entrouvert, badge sur la table, mug avec logo, dossier laissé\n"
+            "- `park/jardin` → chaussures de sport poussiéreuses, photo aimantée, branche séchée\n"
+            "- (cadre custom) → adapte les objets aux objets crédibles dans CE cadre"
+        )
+
+    _push(sections, _section_language(lang_config, language))
+    sections.append(_section_originality())
+    sections.append(_section_execution_flow())
+    sections.append(_section_narration_rules(lang_config))
+    sections.append(_section_player(player))
+    sections.append(_section_setting(setting, custom_setting_text))
+
+    if custom_setting_text:
+        sections.append(
+            f"## Cadre choisi par le joueur\n"
+            f"« {custom_setting_text[:200]} »\n"
+            f"Le NOM du lieu (`{loc_name}`) est déjà adapté à ce cadre — utilise-le tel quel. "
+            f"Adapte aussi les OBJETS évoquant les autres lieux à ce cadre (parchemin, lettre, "
+            f"sceau, jeton de cargaison…)."
+        )
+
+    sections.append(_section_image_handoff())
+    sections.append(_section_mood_enum(style_moods))
+    sections.append(_section_davinci_dialogue(lang_config))
+    sections.append(_section_video_clip(player))
+    sections.append(_section_consistency_rules())
+
+    # Final choices: 4 destinations from the world (drawn from other_locs)
+    if other_locs:
+        # Suggest up to 4 destinations as the choice anchors. Grok phrases them
+        # naturally; the engine tacks on a 5th "Aller ailleurs".
+        sample_locs = other_locs[:4]
+        loc_anchor_lines = [f"- `{l.id}` (**{l.name}**)" for l in sample_locs]
+        sections.append(
+            f"## Choix de fin (4 obligatoires)\n"
+            f"\n"
+            f"Les 4 choix proposés au joueur correspondent à 4 SORTIES VERS DES LIEUX évoqués\n"
+            f"plus haut. Phrase chacun comme une intention naturelle (« Sortir prendre un verre\n"
+            f"au [nom] », « Filer au [nom] pour décompresser »…), pas comme un menu froid.\n"
+            f"\n"
+            f"Lieux à proposer en priorité (ceux qui sont apparus dans la séquence) :\n"
+            + "\n".join(loc_anchor_lines) +
+            f"\n\nUn 5ème choix « Aller ailleurs » sera AJOUTÉ par l'interface — ne l'inclus pas."
+        )
+    else:
+        sections.append(
+            "## Choix de fin (4 obligatoires)\n"
+            "4 choix qui découlent NATURELLEMENT de la scène. Un 5ème choix « Aller ailleurs » "
+            "est AJOUTÉ par l'interface — ne l'inclus pas."
+        )
+
+    _push(sections, _section_custom_instructions(custom_instructions))
+    _push(sections, _section_final_language_reminder(lang_config, language))
+
+    return "\n\n".join(sections)
 
 
 def _build_slice_solo_prompt(
@@ -790,9 +975,20 @@ def _build_slice_prompt(
     character_states: dict | None,
     present_characters: list[str] | None,
 ) -> str:
-    # Solo branch: when the resolver places nobody, the narrator gets a
-    # MUCH leaner prompt with no cast / pool / relationship state at all.
-    # That's the only reliable way to keep Grok from inventing characters.
+    # Sequence 0 in slice mode → INTRO prompt (atmospheric tour at home, props
+    # hint at the other world locations, end choices = those destinations).
+    # Replaces the generic solo prompt for the very first sequence.
+    if sequence_number == 0:
+        return _build_slice_intro_prompt(
+            player=player, setting_id=setting_id,
+            custom_instructions=custom_instructions,
+            custom_setting_text=custom_setting_text,
+            style_moods=style_moods, language=language, world=world,
+        )
+
+    # Solo branch (any later quiet beat with no cast at this loc/slot): the
+    # narrator gets a MUCH leaner prompt with no cast / pool / relationship
+    # state at all. Reliable way to keep Grok from inventing characters.
     if not present_characters:
         return _build_slice_solo_prompt(
             player=player, setting_id=setting_id, sequence_number=sequence_number,
@@ -833,7 +1029,7 @@ def _build_slice_prompt(
     semi_static_sections.append(_section_video_clip(player))
 
     # DYNAMIC (changes between sequences)
-    _push(dynamic_sections, _section_relationships(relationships))
+    _push(dynamic_sections, _section_relationships(relationships, character_states))
     _push(dynamic_sections, _section_known_secondary(consistency_state))
     _push(dynamic_sections, _section_character_actor_lock(consistency_state))
     _push(dynamic_sections, _section_consistency_state(consistency_state, cast, sequence_number, is_slice=True))

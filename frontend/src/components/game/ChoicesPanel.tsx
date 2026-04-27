@@ -78,7 +78,7 @@ export default function ChoicesPanel({
                   className="w-full text-left min-h-[56px] p-4 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 hover:bg-emerald-900/30 transition-all backdrop-blur-sm active:scale-[0.98]"
                 >
                   <span className="text-emerald-400 font-mono text-xs mr-2 uppercase">⌖</span>
-                  <span className="text-white/90 text-sm leading-relaxed">Aller ailleurs (carte)</span>
+                  <span className="text-white/90 text-sm leading-relaxed">{t('map.go_elsewhere_choice')}</span>
                 </button>
               )}
 

@@ -140,6 +140,26 @@ const translations: Record<string, Record<string, string>> = {
     'setup.step4.ready_title': 'Pret a commencer',
     'setup.step4.ready_subtitle': 'Ton histoire est configuree. Lance-toi quand tu veux.',
     'setup.step4.advanced': 'Parametres avances',
+
+    // Map / slice-of-life
+    'map.title': 'Carte',
+    'map.title_modal': 'Carte des lieux',
+    'map.day': 'Jour',
+    'map.pick_location': "Choisis un lieu où aller. Le temps avance d'un cran : prochain moment =",
+    'map.you_are_here': 'tu es ici',
+    'map.character_here_tooltip': 'est probablement ici en ce moment',
+    'map.agenda_title': "Agenda — ce qu'on t'a dit",
+    'map.agenda_today': "aujourd'hui",
+    'map.agenda_day_short': 'J',
+    'map.history_title': 'Récents',
+    'map.close': 'Fermer',
+    'map.slot.morning': 'matin',
+    'map.slot.afternoon': 'après-midi',
+    'map.slot.evening': 'soir',
+    'map.slot.night': 'nuit',
+    'map.go_elsewhere_choice': 'Aller ailleurs (carte)',
+    'map.move_choice_prefix': 'Aller ailleurs',
+    'map.not_active': "Le mode slice-of-life n'est pas activé pour cette session.",
   },
 
   // ── English ──
@@ -270,6 +290,26 @@ const translations: Record<string, Record<string, string>> = {
     'setup.step4.ready_title': 'Ready to start',
     'setup.step4.ready_subtitle': 'Your story is configured. Hit Start whenever you want.',
     'setup.step4.advanced': 'Advanced settings',
+
+    // Map / slice-of-life
+    'map.title': 'Map',
+    'map.title_modal': 'Map of places',
+    'map.day': 'Day',
+    'map.pick_location': 'Pick a place to go. Time advances by one slot: next moment =',
+    'map.you_are_here': 'you are here',
+    'map.character_here_tooltip': 'is likely here right now',
+    'map.agenda_title': "Agenda — what you've been told",
+    'map.agenda_today': 'today',
+    'map.agenda_day_short': 'D',
+    'map.history_title': 'Recent',
+    'map.close': 'Close',
+    'map.slot.morning': 'morning',
+    'map.slot.afternoon': 'afternoon',
+    'map.slot.evening': 'evening',
+    'map.slot.night': 'night',
+    'map.go_elsewhere_choice': 'Go elsewhere (map)',
+    'map.move_choice_prefix': 'Go elsewhere',
+    'map.not_active': 'Slice-of-life mode is not active for this session.',
   },
 
   // ── Spanish ──

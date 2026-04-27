@@ -292,6 +292,7 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
             locs, states = await generate_world_and_agents(
                 grok_client, setting_label, req.custom_setting or "", cast_tuples,
                 grok_model=session.grok_model,
+                language=session.language,
             )
             if locs and states:
                 # Build the world with the themed location set
@@ -1472,6 +1473,7 @@ async def resume_session(session_id: str, user: dict = Depends(get_current_user)
     session.consistency.prompt_overrides = {int(k): v for k, v in cs.get("prompt_overrides", {}).items()}
     session.consistency.secondary_characters = cs.get("secondary_characters", {})
     session.consistency.character_actors = cs.get("character_actors", {})
+    session.consistency.appearance = cs.get("appearance", {})
 
     sessions[session_id] = session
 
