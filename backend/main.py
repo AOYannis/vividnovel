@@ -2052,6 +2052,216 @@ async def playground_generate(req: PlaygroundRequest):
     return result
 
 
+# ─── Prompt-builder Iteration Lab ────────────────────────────────────────────
+# Lets the dev pick a scene from a past game, see the original Z-Image prompt
+# and the EXACT inputs the prompt-builder agent received, then re-run the
+# prompt-builder with a custom SYSTEM_PROMPT to compare outputs.
+
+@app.get("/api/iterate/system_prompt")
+async def get_iterate_system_prompt(user: dict = Depends(get_current_user)):
+    """Return the current production SYSTEM_PROMPT for the image-prompt builder
+    agent (scene_agent.SYSTEM_PROMPT). Used to seed the iterate-tab textarea."""
+    from scene_agent import SYSTEM_PROMPT
+    return {"system_prompt": SYSTEM_PROMPT}
+
+
+@app.get("/api/iterate/scenes")
+async def get_iterate_scenes(limit: int = 30, user: dict = Depends(get_current_user)):
+    """List recent scenes from the current user's sessions, suitable for the
+    iterate-tab picker. Each scene includes:
+      - session_id, sequence_number, scene_index, timestamp
+      - replay_inputs (full craft_image_prompt args — present only for recent
+        sessions logged AFTER the iterate feature shipped)
+      - final_prompt (the Z-Image prompt actually sent)
+      - image_url, seed, loras_applied (from the matching image_result event)
+
+    Reads from backend/logs/session_log.jsonl (file-based), filters to
+    session_ids owned by the current user via DB lookup. Image URLs are
+    Runware CDN links — old ones may return 404."""
+    import os
+    user_sessions = await db.list_user_sessions(user["user_id"])
+    owned = {s["id"] for s in (user_sessions or [])}
+    if not owned:
+        return {"scenes": []}
+
+    log_path = os.path.join(os.path.dirname(__file__), "logs", "session_log.jsonl")
+    if not os.path.exists(log_path):
+        return {"scenes": []}
+
+    scenes: list[dict] = []
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                sid = entry.get("session_id", "")
+                if sid not in owned:
+                    continue
+                seq = entry.get("sequence_number")
+                ts = entry.get("timestamp", "")
+                events = entry.get("events", []) or []
+
+                # Index events by (type, scene_index) for join.
+                crafted_by_idx: dict[int, dict] = {}
+                result_by_idx: dict[int, dict] = {}
+                for e in events:
+                    et = e.get("type")
+                    if et == "image_prompt_crafted":
+                        idx = e.get("index")
+                        if idx is not None:
+                            crafted_by_idx[idx] = e
+                    elif et == "image_result":
+                        idx = e.get("index")
+                        if idx is not None:
+                            result_by_idx[idx] = e
+
+                for idx, crafted in crafted_by_idx.items():
+                    if not crafted.get("replay_inputs"):
+                        continue  # pre-feature scene, can't replay
+                    res = result_by_idx.get(idx, {})
+                    scenes.append({
+                        "session_id": sid,
+                        "sequence_number": seq,
+                        "scene_index": idx,
+                        "timestamp": ts,
+                        "scene_summary": crafted.get("scene_summary", ""),
+                        "shot_intent": crafted.get("shot_intent", ""),
+                        "mood": crafted.get("mood", ""),
+                        "actors_present": crafted.get("actors_present", []),
+                        "final_prompt": crafted.get("final_prompt", ""),
+                        "replay_inputs": crafted.get("replay_inputs"),
+                        "image_url": res.get("final_prompt") and "" or "",  # placeholder
+                        "loras_applied": res.get("loras_applied", []),
+                        "seed": res.get("seed"),
+                        "width": res.get("width"),
+                        "height": res.get("height"),
+                        "steps": res.get("steps"),
+                        "cfg": res.get("cfg"),
+                    })
+    except Exception as e:
+        raise HTTPException(500, f"Failed to read session log: {e}")
+
+    # The session_log.jsonl doesn't include image_url directly in image_result —
+    # join it from the DB images table for owned sessions. Build an index.
+    if scenes:
+        try:
+            owned_list = list({s["session_id"] for s in scenes})
+            url_lookup: dict[tuple, str] = {}
+            for sid in owned_list:
+                try:
+                    seqs = await db.load_sequence_history(sid)
+                except Exception:
+                    seqs = []
+                # load_sequence_history returns each sequence with its images
+                for seq_row in seqs or []:
+                    seq_num = seq_row.get("sequence_number")
+                    for img in seq_row.get("images", []) or []:
+                        idx = img.get("image_index")
+                        url = img.get("url")
+                        if seq_num is not None and idx is not None and url:
+                            url_lookup[(sid, seq_num, idx)] = url
+            for s in scenes:
+                key = (s["session_id"], s["sequence_number"], s["scene_index"])
+                s["image_url"] = url_lookup.get(key, "")
+        except Exception:
+            pass
+
+    # Most recent first, capped to `limit`.
+    scenes.sort(key=lambda s: (s.get("timestamp", ""), s.get("sequence_number", 0), s.get("scene_index", 0)), reverse=True)
+    return {"scenes": scenes[:limit]}
+
+
+class IterateRecraftRequest(BaseModel):
+    replay_inputs: dict
+    system_prompt: str
+    use_original_seed: bool = True
+    seed: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    steps: Optional[int] = None
+    loras: Optional[List[dict]] = None  # [{id, weight}] override (replaces ALL)
+    mood_data_override: Optional[dict] = None  # full mood dict; replaces mood_data fed to craft_image_prompt
+    mood_name_override: Optional[str] = None   # e.g. swap mood label for testing
+
+
+@app.post("/api/iterate/recraft")
+async def iterate_recraft(req: IterateRecraftRequest, user: dict = Depends(get_current_user)):
+    """Re-run the prompt-builder + Z-Image render for a captured scene with a
+    custom SYSTEM_PROMPT, returning the new prompt and image. Inputs come from
+    the captured `replay_inputs` dict (from /api/iterate/scenes); seed re-uses
+    the original by default for apples-to-apples comparison."""
+    if runware_client is None:
+        raise HTTPException(503, "Runware not connected")
+    from scene_agent import craft_image_prompt
+    ri = req.replay_inputs or {}
+
+    # Mood overrides — let the iterate UI swap in an edited prompt_block / LoRA
+    # config without touching the rest of the captured inputs.
+    effective_mood_name = req.mood_name_override if req.mood_name_override is not None else ri.get("mood_name")
+    effective_mood_data = req.mood_data_override if req.mood_data_override is not None else ri.get("mood_data")
+
+    try:
+        crafted_prompt, craft_elapsed = await craft_image_prompt(
+            grok_client,
+            scene_index=0,
+            scene_summary=ri.get("scene_summary", ""),
+            shot_intent=ri.get("shot_intent", ""),
+            actors_present=list(ri.get("actors_present", [])),
+            mood_name=effective_mood_name,
+            actor_lookup=ri.get("actor_lookup", {}),
+            mood_data=effective_mood_data,
+            setting_label=ri.get("setting_label", ""),
+            custom_setting_text=ri.get("custom_setting_text", ""),
+            location_hint=ri.get("location_hint", ""),
+            clothing_state=ri.get("clothing_state", {}),
+            appearance_state=ri.get("appearance_state", {}),
+            time_of_day=ri.get("time_of_day"),
+            language=ri.get("language", "fr"),
+            player_gender=ri.get("player_gender", "male"),
+            grok_model=ri.get("grok_model", "grok-4-1-fast-non-reasoning"),
+            system_prompt_override=req.system_prompt,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Prompt craft failed: {e}")
+
+    seed_to_use = req.seed if (not req.use_original_seed and req.seed is not None) else None
+    # Caller can leave seed=None to randomize OR pass an explicit seed.
+    gen_args = {
+        "image_prompt": crafted_prompt,
+        "actors_present": list(ri.get("actors_present", [])),
+        "style_moods": ["neutral"] if effective_mood_name in (None, "neutral", "") else [effective_mood_name],
+    }
+    if seed_to_use is not None:
+        gen_args["seed"] = seed_to_use
+
+    # Use the actor list as cast so character LoRAs load.
+    cast = {"actors": list(ri.get("actors_present", [])), "actor_voices": {}}
+    engine = StoryEngine(grok_client, runware_client)
+    try:
+        if req.loras is not None:
+            manual = [{"id": l["id"], "weight": l.get("weight", 0.8)} for l in req.loras]
+            img_result = await engine._generate_image(
+                gen_args, cast,
+                style_loras=manual, extra_loras=[],
+                width=req.width, height=req.height, steps=req.steps,
+            )
+        else:
+            img_result = await engine._generate_image(
+                gen_args, cast,
+                width=req.width, height=req.height, steps=req.steps,
+            )
+    except Exception as e:
+        raise HTTPException(500, f"Image generation failed: {e}")
+
+    return {
+        "crafted_prompt": crafted_prompt,
+        "craft_elapsed": craft_elapsed,
+        "image": img_result,
+    }
+
+
 class ControlNetConfig(BaseModel):
     type: str = "openpose"  # openpose | canny | depth_midas | depth_zoe | depth_leres
     guide_image: str = ""   # URL of the reference image

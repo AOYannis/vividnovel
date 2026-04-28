@@ -528,7 +528,11 @@ export async function streamPromptModification(
 export async function fetchPlaygroundConfig(): Promise<{
   actors: { code: string; name: string; description: string }[]
   settings: { id: string; name: string }[]
-  moods: Record<string, { description: string }>
+  moods: Record<string, {
+    description: string
+    prompt_block?: string
+    lora?: { id: string; name: string; weight: number } | null
+  }>
   loras: { id: string; name: string; type: string }[]
   defaults: { width: number; height: number; steps: number }
   languages: string[]
@@ -586,6 +590,78 @@ export async function generatePlayground(params: {
   }
   return res.json()
 }
+
+// ─── Prompt-builder Iteration Lab ───────────────────────────────────────────
+
+export interface IterateScene {
+  session_id: string
+  sequence_number: number
+  scene_index: number
+  timestamp: string
+  scene_summary: string
+  shot_intent: string
+  mood: string
+  actors_present: string[]
+  final_prompt: string
+  replay_inputs: Record<string, any>
+  image_url: string
+  loras_applied: { id: string; weight: number }[]
+  seed: number | null
+  width?: number
+  height?: number
+  steps?: number
+  cfg?: number
+}
+
+export async function fetchIterateSystemPrompt(): Promise<{ system_prompt: string }> {
+  const res = await apiFetch('/api/iterate/system_prompt')
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Failed to load system prompt')
+  return res.json()
+}
+
+export async function fetchIterateScenes(limit = 30): Promise<{ scenes: IterateScene[] }> {
+  const res = await apiFetch(`/api/iterate/scenes?limit=${limit}`)
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Failed to load scenes')
+  return res.json()
+}
+
+export async function iterateRecraft(params: {
+  replay_inputs: Record<string, any>
+  system_prompt: string
+  use_original_seed?: boolean
+  seed?: number | null
+  width?: number
+  height?: number
+  steps?: number
+  loras?: { id: string; weight: number }[] | null
+  mood_data_override?: Record<string, any> | null
+  mood_name_override?: string | null
+}): Promise<{
+  crafted_prompt: string
+  craft_elapsed: number
+  image: {
+    url: string
+    cost: number
+    seed: number | null
+    elapsed: number
+    settings: {
+      width: number; height: number; steps: number; cfg: number
+      loras: { id: string; weight: number }[]
+      final_prompt: string
+    }
+  }
+}> {
+  const res = await apiFetch('/api/iterate/recraft', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Recraft failed')
+  }
+  return res.json()
+}
+
 
 export async function playgroundVideo(params: {
   image_url: string

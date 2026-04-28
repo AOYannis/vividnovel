@@ -955,9 +955,30 @@ class StoryEngine:
                             args["image_prompt"] = crafted_prompt
                             args["style_moods"] = ["neutral"] if mood_name == "neutral" else [mood_name]
 
+                            # Snapshot of every craft_image_prompt input — lets the
+                            # /iterate prompt-lab tab deterministically replay this
+                            # exact scene with a custom SYSTEM_PROMPT.
+                            replay_inputs = {
+                                "scene_summary": scene_summary,
+                                "shot_intent": shot_intent,
+                                "actors_present": list(actors_present),
+                                "mood_name": mood_name,
+                                "actor_lookup": {k: dict(v) for k, v in (actor_lookup or {}).items()},
+                                "mood_data": dict(mood_data) if isinstance(mood_data, dict) else mood_data,
+                                "setting_label": setting_label,
+                                "custom_setting_text": session.custom_setting_text or "",
+                                "location_hint": location_hint,
+                                "clothing_state": dict(merged_clothing or {}),
+                                "appearance_state": dict(appearance_state or {}),
+                                "time_of_day": tod,
+                                "language": session.language or "fr",
+                                "player_gender": (session.player or {}).get("gender", "male"),
+                                "grok_model": session.grok_model,
+                            }
                             log.log_image_prompt_crafted(
                                 image_index, scene_summary, shot_intent, mood_name,
                                 actors_present, crafted_prompt, craft_elapsed,
+                                replay_inputs=replay_inputs,
                             )
 
                             # Log the image request

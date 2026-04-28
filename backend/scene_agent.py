@@ -304,11 +304,16 @@ async def craft_image_prompt(
     language: str,
     player_gender: str,
     grok_model: str = "grok-4-1-fast-non-reasoning",
+    system_prompt_override: str | None = None,
 ) -> tuple[str, float]:
     """Synthesise a Z-Image Turbo prompt from a lean narrator scene spec.
 
     Returns (prompt_string, elapsed_seconds). Falls back to a minimal hand-rolled
     prompt on Grok failure so the image pipeline never blocks.
+
+    `system_prompt_override`: when set, replaces the module-level SYSTEM_PROMPT
+    for this single call. Used by the /iterate prompt-lab tab to test edits
+    against captured historical scene inputs.
     """
     actor_block = _format_actor_block(actors_present, actor_lookup)
     mood_block = _format_mood_block(mood_name, mood_data)
@@ -358,12 +363,14 @@ satisfies every rule from the system prompt. If the location is a custom setting
 (pirate, sci-fi, fantasy…) make sure the visual vocabulary fits — never default
 to a generic Parisian café when the setting says otherwise."""
 
+    sys_msg = system_prompt_override if system_prompt_override else SYSTEM_PROMPT
+
     start = time.time()
     try:
         resp = await grok_client.chat.completions.create(
             model=grok_model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": sys_msg},
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.6,

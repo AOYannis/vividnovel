@@ -110,15 +110,21 @@ class SequenceLogger:
     def log_image_prompt_crafted(self, index: int, scene_summary: str,
                                   shot_intent: str, mood: str,
                                   actors: list[str], final_prompt: str,
-                                  elapsed: float):
+                                  elapsed: float,
+                                  replay_inputs: dict | None = None):
         """Audit how the image-prompt specialist (Phase 3A) transformed the
-        narrator's lean scene spec into the final Z-Image prompt."""
+        narrator's lean scene spec into the final Z-Image prompt.
+
+        `replay_inputs` (optional) is a snapshot of every argument needed to
+        deterministically re-call craft_image_prompt later — used by the
+        /iterate prompt-lab tab. Includes clothing/appearance state, time of
+        day, location/setting, language, player gender, mood data, etc."""
         self._print(
             f"  PROMPT-CRAFT {index}: mood={mood} actors={actors} "
             f"summary={scene_summary[:60]!r} intent={shot_intent[:40]!r} "
             f"final={len(final_prompt)} chars in {elapsed}s"
         )
-        self._add("image_prompt_crafted", {
+        entry = {
             "index": index,
             "scene_summary": scene_summary,
             "shot_intent": shot_intent,
@@ -127,7 +133,10 @@ class SequenceLogger:
             "final_prompt": final_prompt,
             "final_prompt_length": len(final_prompt),
             "elapsed": elapsed,
-        })
+        }
+        if replay_inputs:
+            entry["replay_inputs"] = replay_inputs
+        self._add("image_prompt_crafted", entry)
 
     def log_image_result(self, index: int, loras_applied: list[dict],
                          final_prompt: str, width: int, height: int,

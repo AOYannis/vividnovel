@@ -4,6 +4,7 @@ import {
   fetchPlaygroundConfig, generatePlayground, manualGenerate, playgroundVideo,
   playgroundTTS, playgroundTTSEnhance, playgroundAudioVideo,
 } from '../api/client'
+import IterateTab from '../components/IterateTab'
 
 interface PlaygroundConfig {
   actors: { code: string; name: string; description: string }[]
@@ -40,7 +41,7 @@ interface SimResult {
   image_error?: string
 }
 
-type Mode = 'simulate' | 'manual' | 'video' | 'speech'
+type Mode = 'simulate' | 'manual' | 'video' | 'speech' | 'iterate'
 
 function LoraEditor({ loras, available, onChange }: {
   loras: { id: string; weight: number }[]
@@ -473,12 +474,25 @@ export default function PlaygroundPage() {
               onClick={() => setMode('speech')}
               className={`px-3 py-1 text-xs rounded-md transition-colors ${mode === 'speech' ? 'bg-amber-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
             >Speech</button>
+            <button
+              onClick={() => setMode('iterate')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${mode === 'iterate' ? 'bg-amber-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
+              title="Iterate on the prompt-builder SYSTEM_PROMPT against captured past scenes"
+            >Iterate</button>
           </div>
           <div className="flex-1" />
           <span className="text-[10px] text-neutral-600 font-mono">Z-Image Turbo</span>
         </div>
       </header>
 
+      {/* Iterate mode: full-width, bypasses the two-column layout */}
+      {mode === 'iterate' && (
+        <div className="max-w-[1600px] mx-auto p-4 lg:p-6">
+          <IterateTab />
+        </div>
+      )}
+
+      {mode !== 'iterate' && (
       <div className="max-w-[1600px] mx-auto flex flex-col lg:flex-row gap-0 lg:gap-6 p-4 lg:p-6">
         {/* ── Left panel ── */}
         <div className="w-full lg:w-[440px] shrink-0 space-y-4">
@@ -1176,6 +1190,7 @@ export default function PlaygroundPage() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
