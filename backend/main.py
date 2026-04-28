@@ -417,17 +417,42 @@ def _build_world_payload(session) -> dict:
       - world: clock + locations + history
       - character_states: per-character agent state (slim — schedule + personality + job + mood)
       - known_whereabouts: things the PLAYER has been told
-      - presence_now: {loc_id → [char_codes]} — resolver output for the CURRENT slot
-    Returns {world: None} when slice-of-life is off."""
+      - presence_now: {loc_id → [char_codes]} — see note below
+    Returns {world: None} when slice-of-life is off.
+
+    `presence_now` is a *forecast* of what the player will find. It splits:
+      - the player's CURRENT location → resolver at the current slot
+      - every OTHER location → resolver at the NEXT slot, because picking
+        a location on the map advances time by one slot before the next
+        sequence runs. Without this split, the chips show "Nesra at the bar"
+        for evening, the player taps the bar, time advances to night, and
+        the resolver re-rolls — Nesra is now home and the scene is empty.
+    """
     if session.world is None:
         return {"world": None}
-    from world import who_is_at, upcoming_rendezvous
+    from world import who_is_at, upcoming_rendezvous, SLOTS
     world = session.world
     states = session.character_states or {}
+    # Compute the "next slot" the player would land in if they moved now.
+    try:
+        _i = SLOTS.index(world.slot)
+    except ValueError:
+        _i = 0
+    if _i == len(SLOTS) - 1:
+        next_slot = SLOTS[0]
+        next_day = world.day + 1
+    else:
+        next_slot = SLOTS[_i + 1]
+        next_day = world.day
     presence_now: dict[str, list[str]] = {}
     if states:
         for loc in world.locations:
-            present = who_is_at(loc.id, world.day, world.slot, states)
+            if loc.id == world.current_location:
+                # Player is already here → no time advance → current slot resolver
+                present = who_is_at(loc.id, world.day, world.slot, states)
+            else:
+                # Going there advances time → forecast for the destination slot
+                present = who_is_at(loc.id, next_day, next_slot, states)
             if present:
                 presence_now[loc.id] = present
     # Rendez-vous list with status (now / next / soon / future), sorted soonest-first.

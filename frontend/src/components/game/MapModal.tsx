@@ -219,7 +219,9 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
                         <span
                           key={c}
                           className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-800/40 font-mono"
-                          title={`${shortName(c, characterNames)} ${t('map.character_here_tooltip')}`}
+                          title={isCurrent
+                            ? `${shortName(c, characterNames)} ${t('map.character_here_tooltip')}`
+                            : `${shortName(c, characterNames)} ${t('map.character_on_arrival_tooltip')}`}
                         >
                           {shortName(c, characterNames)}
                         </span>
