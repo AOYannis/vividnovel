@@ -201,8 +201,12 @@ class GameSession:
         self.character_states: dict[str, CharacterState] = {}
         # Player-known whereabouts (Phase 2B): things the player has been TOLD
         # about future character locations. Source: dialogue extractor.
-        # Each entry: {char, location_id, day, slot, source}
+        # Each entry: {char, location_id, day, slot, source, is_rendezvous?, missed?, kept?}
         self.known_whereabouts: list[dict] = []
+        # Missed rendez-vous events that haven't been mentioned in narration yet.
+        # Cleared once the narrator has had one chance to weave them in. List of
+        # {char, location_id, day, slot, source} (the original whereabouts entry).
+        self.recent_missed_rendezvous: list[dict] = []
 
 
 class StoryEngine:
@@ -249,12 +253,79 @@ class StoryEngine:
             if hasattr(session, '_custom_actor_override'):
                 self._custom_override = session._custom_actor_override
 
+            # ── Adjudicate past rendez-vous (Feature 1 follow-up) ──────────
+            # Walk every PAST rdv and decide: kept (player was there) vs missed.
+            # Missed RDVs apply a relationship penalty (level -1, clamped 0) AND
+            # are stashed on session.recent_missed_rendezvous so the next
+            # encounter's prompt can mention it in narration.
+            if session.world and session.known_whereabouts:
+                from world import adjudicate_past_rendezvous
+                missed, kept = adjudicate_past_rendezvous(session.world, session.known_whereabouts)
+                for w in missed:
+                    code = w.get("char")
+                    if code and code in session.relationships:
+                        rel = session.relationships[code]
+                        prev = int(rel.get("level", 0) or 0)
+                        rel["level"] = max(0, prev - 1)
+                        print(f"[rdv] MISSED — {code} relationship dropped {prev}→{rel['level']} "
+                              f"(rdv at {w.get('location_id')}/{w.get('slot')} day {w.get('day')})")
+                    session.recent_missed_rendezvous.append(w)
+                if kept:
+                    for w in kept:
+                        print(f"[rdv] KEPT — {w.get('char')} at {w.get('location_id')}/{w.get('slot')} day {w.get('day')}")
+
+            # ── Daily tick (Phase 5) ────────────────────────────────────
+            # Advance each character's inner life ONCE per game day. Updates
+            # today_mood / intentions_toward_player / recent_event so the
+            # narrator gets a fresh signal to play with each new day.
+            if session.world and session.character_states:
+                _needs_tick = any(
+                    (cs.last_tick_day or 0) < session.world.day
+                    for cs in session.character_states.values()
+                )
+                if _needs_tick:
+                    try:
+                        from agent import daily_tick as _daily_tick
+                        from config import SETTINGS as _SETTINGS
+                        _setting_label = (
+                            _SETTINGS.get(session.setting, {}).get("label")
+                            or session.custom_setting_text[:80]
+                            or session.setting
+                            or ""
+                        )
+                        _updates = await _daily_tick(
+                            self.grok,
+                            session.character_states,
+                            session.relationships,
+                            session.world.day,
+                            _setting_label,
+                            custom_setting_text=session.custom_setting_text or "",
+                            grok_model=session.grok_model,
+                        )
+                        for code, payload in (_updates or {}).items():
+                            cs = session.character_states.get(code)
+                            if not cs:
+                                continue
+                            if payload.get("today_mood"):
+                                cs.today_mood = payload["today_mood"]
+                            if payload.get("intentions_toward_player"):
+                                cs.intentions_toward_player = payload["intentions_toward_player"]
+                            if payload.get("recent_event"):
+                                cs.recent_event = payload["recent_event"]
+                            cs.last_tick_day = session.world.day
+                            print(f"[tick] {code} (day {session.world.day}): "
+                                  f"mood={cs.today_mood!r} intent={cs.intentions_toward_player!r} "
+                                  f"event={cs.recent_event[:60]!r}")
+                    except Exception as e:
+                        print(f"[tick] daily_tick failed: {e}; characters keep yesterday's state")
+
             # Resolve which characters are present at the current location/slot.
             # The list is what build_system_prompt uses to inject FULL agent
             # context only for the relevant characters (vs dumping all bios).
             present_characters: list[str] = []
+            rendezvous_here_now: list[dict] = []  # rendez-vous matching THIS loc + slot
             if session.world and session.character_states:
-                from world import who_is_at
+                from world import who_is_at, imminent_rendezvous
                 present_characters = who_is_at(
                     session.world.current_location,
                     session.world.day,
@@ -275,6 +346,42 @@ class StoryEngine:
                     print(f"[slice] Capping early sequence to 1 char (resolver had {present_characters})")
                     present_characters = present_characters[:1]
 
+                # ── Rendez-vous override (Feature 1) ─────────────────────────
+                # A rendez-vous IS a meeting — it overrides the early-game cap
+                # and the resolver. If a character has agreed to meet the player
+                # at THIS location AND it's NOW (status=='now'), force their
+                # presence so the encounter actually happens.
+                rdv_imminent = imminent_rendezvous(
+                    session.world,
+                    session.known_whereabouts or [],
+                )
+                rendezvous_here_now = [
+                    r for r in rdv_imminent
+                    if r.get("status") == "now"
+                    and r.get("location_id") == session.world.current_location
+                ]
+                for r in rendezvous_here_now:
+                    code = r.get("char")
+                    if code and code not in present_characters:
+                        present_characters.append(code)
+                        print(f"[slice] RENDEZ-VOUS override: {code} forced into "
+                              f"present_characters (rdv at {r.get('location_id')}/{r.get('slot')})")
+
+            # Compute "next-slot" rendez-vous teasers for the prompt: rdvs with
+            # status='next' that are NOT also already-here-now (those win above).
+            rendezvous_next: list[dict] = []
+            if session.world and session.character_states:
+                from world import imminent_rendezvous as _imm
+                _next = _imm(session.world, session.known_whereabouts or [])
+                _here_chars = {r.get("char") for r in rendezvous_here_now}
+                rendezvous_next = [r for r in _next if r.get("status") == "next" and r.get("char") not in _here_chars]
+
+            # Surface any not-yet-narrated missed RDVs to the prompt. We hand the
+            # whole list once and clear it — the narrator gets ONE chance to weave
+            # the consequences in (a cold greeting, a sharp comment, etc.).
+            missed_to_narrate = list(session.recent_missed_rendezvous)
+            session.recent_missed_rendezvous.clear()
+
             # Build system prompt
             system_prompt = session.system_prompt_override or build_system_prompt(
                 player=session.player,
@@ -291,6 +398,9 @@ class StoryEngine:
                 world=session.world,
                 character_states=session.character_states,
                 present_characters=present_characters,
+                rendezvous_here_now=rendezvous_here_now,
+                rendezvous_next=rendezvous_next,
+                recent_missed_rendezvous=missed_to_narrate,
             )
 
             # Mem0 memory recall (session-scoped only — no cross-session contamination)
@@ -829,11 +939,32 @@ class StoryEngine:
                                 # Same logic as _emit_image_result for dialogue-only / for_video_only:
                                 # only when this scene will actually get a P-Video that uses our audio.
                                 will_have_video = (v_backend == "pvideo") and (image_index >= v_start_scene)
-                                use_dialogue_only = bool(v_to_video and will_have_video)
+                                wants_dialogue_only = bool(v_to_video and will_have_video)
                                 # Use the latest narration appended for this round
                                 ntext = narration_segments_acc[-1] if narration_segments_acc else ""
                                 if ntext.strip():
-                                    tts_tasks_by_idx[image_index] = self._launch_tts(
+                                    # Lipsync-mode TTS only makes sense when there IS dialogue.
+                                    # If the scene is pure narration (no quoted lines), forcing
+                                    # the video to lip-sync narration audio looks wrong (the
+                                    # character mouths the narrator's words, in the narrator's
+                                    # voice). Detect early and route accordingly:
+                                    #   - has dialogue → dialogue-only TTS for video lipsync
+                                    #     (existing behaviour)
+                                    #   - no dialogue + lipsync wanted → standalone narration
+                                    #     TTS so the user still hears the scene; SKIP the
+                                    #     video-bound TTS so video gen falls back to its
+                                    #     prompt-only path (ambient sounds, breath, etc.)
+                                    use_dialogue_only = wants_dialogue_only
+                                    register_for_video = wants_dialogue_only
+                                    if wants_dialogue_only:
+                                        from tts import extract_dialogue
+                                        if not extract_dialogue(ntext).strip():
+                                            print(f"[tts] Scene {image_index}: no dialogue in narration "
+                                                  f"— skipping lipsync TTS, firing standalone narration only "
+                                                  f"(video will use prompt-only ambient).")
+                                            use_dialogue_only = False
+                                            register_for_video = False
+                                    tts_task = self._launch_tts(
                                         image_index, ntext, queue,
                                         sequence_number=session.sequence_number if session else 0,
                                         voice=v_voice, language=v_lang, enhance=v_enhance,
@@ -846,6 +977,8 @@ class StoryEngine:
                                         actor_voices=v_actor_voices,
                                         actors_present=actors_present,
                                     )
+                                    if register_for_video:
+                                        tts_tasks_by_idx[image_index] = tts_task
 
                             scene_actors[image_index] = list(args.get("actors_present", []) or [])
                             await queue.put({
@@ -1218,15 +1351,34 @@ class StoryEngine:
                     )
                     # Dedupe: same (char, day, slot, location_id) already present?
                     seen = {(m["char"], m["day"], m["slot"], m["location_id"]) for m in session.known_whereabouts}
+                    existing_loc_ids = {l.id for l in session.world.locations}
                     added = 0
+                    new_locs_added = 0
                     for m in new_mentions:
+                        # Phase C: if the extractor proposed a NEW location, register
+                        # it on the world before storing the whereabouts (so the
+                        # location is visible on the map and the whereabouts is valid).
+                        new_loc = m.pop("new_location", None) if isinstance(m, dict) else None
+                        if new_loc and new_loc.get("id") not in existing_loc_ids:
+                            from world import Location as _Loc
+                            session.world.locations.append(_Loc(
+                                id=new_loc["id"],
+                                name=new_loc.get("name") or new_loc["id"],
+                                type=new_loc.get("type") or "other",
+                                description=new_loc.get("description") or "",
+                            ))
+                            existing_loc_ids.add(new_loc["id"])
+                            new_locs_added += 1
+                            print(f"[world] +location {new_loc['id']} ({new_loc.get('name')!r}) "
+                                  f"from narration: « {(m.get('source') or '')[:60]} »")
                         key = (m["char"], m["day"], m["slot"], m["location_id"])
                         if key not in seen:
                             session.known_whereabouts.append(m)
                             seen.add(key)
                             added += 1
                     if added:
-                        print(f"[agent] +{added} known whereabouts (total {len(session.known_whereabouts)})")
+                        print(f"[agent] +{added} known whereabouts (total {len(session.known_whereabouts)})"
+                              + (f" + {new_locs_added} new locations" if new_locs_added else ""))
                 except Exception as e:
                     print(f"[agent] whereabouts extract failed: {e}")
 

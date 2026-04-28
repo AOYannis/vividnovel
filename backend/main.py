@@ -421,7 +421,7 @@ def _build_world_payload(session) -> dict:
     Returns {world: None} when slice-of-life is off."""
     if session.world is None:
         return {"world": None}
-    from world import who_is_at
+    from world import who_is_at, upcoming_rendezvous
     world = session.world
     states = session.character_states or {}
     presence_now: dict[str, list[str]] = {}
@@ -430,11 +430,15 @@ def _build_world_payload(session) -> dict:
             present = who_is_at(loc.id, world.day, world.slot, states)
             if present:
                 presence_now[loc.id] = present
+    # Rendez-vous list with status (now / next / soon / future), sorted soonest-first.
+    # Powers the RDV badge + agenda highlight in the map UI.
+    upcoming = upcoming_rendezvous(world, session.known_whereabouts or [])
     return {
         "world": world.as_dict(),
         "character_states": {code: s.as_dict() for code, s in states.items()},
         "known_whereabouts": list(session.known_whereabouts or []),
         "presence_now": presence_now,
+        "upcoming_rendezvous": upcoming,
     }
 
 
@@ -1485,6 +1489,9 @@ async def resume_session(session_id: str, user: dict = Depends(get_current_user)
     _known_wh_packed = (session.video_settings or {}).get("_known_whereabouts") or []
     if _known_wh_packed:
         session.known_whereabouts = list(_known_wh_packed)
+    _missed_packed = (session.video_settings or {}).get("_recent_missed_rendezvous") or []
+    if _missed_packed:
+        session.recent_missed_rendezvous = list(_missed_packed)
     # Restore consistency
     cs = row.get("consistency_state", {})
     session.consistency.location = cs.get("location", "")

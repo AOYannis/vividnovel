@@ -53,6 +53,9 @@ async def save_session(session) -> None:
         known_wh = getattr(session, "known_whereabouts", None) or []
         if known_wh:
             video_settings["_known_whereabouts"] = list(known_wh)
+        recent_missed = getattr(session, "recent_missed_rendezvous", None) or []
+        if recent_missed:
+            video_settings["_recent_missed_rendezvous"] = list(recent_missed)
         _client.table("game_sessions").upsert({
             "id": session.id,
             "user_id": session.user_id,

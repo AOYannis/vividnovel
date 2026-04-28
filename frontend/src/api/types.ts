@@ -156,6 +156,15 @@ export interface KnownWhereabout {
   day: number
   slot: WorldSlot
   source: string          // short verbatim / paraphrase
+  is_rendezvous?: boolean // true if this is a mutual appointment with the player
+}
+
+/** Lifecycle of a rendez-vous relative to the world clock. */
+export type RendezvousStatus = 'now' | 'next' | 'soon' | 'future'
+
+export interface UpcomingRendezvous extends KnownWhereabout {
+  is_rendezvous: true
+  status: RendezvousStatus
 }
 
 export interface WorldPayload {
@@ -163,6 +172,7 @@ export interface WorldPayload {
   character_states?: Record<string, CharacterState>
   known_whereabouts?: KnownWhereabout[]
   presence_now?: Record<string, string[]>   // loc_id → [char_codes]
+  upcoming_rendezvous?: UpcomingRendezvous[]
 }
 
 // ─── Story Sequence ──────────────────────────────────────────────────────────

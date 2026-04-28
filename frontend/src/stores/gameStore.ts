@@ -81,6 +81,7 @@ interface GameState {
   characterStates: Record<string, import('../api/types').CharacterState>
   knownWhereabouts: import('../api/types').KnownWhereabout[]
   presenceNow: Record<string, string[]>     // loc_id → [char_codes] for current slot
+  upcomingRendezvous: import('../api/types').UpcomingRendezvous[]
 
   // ── Actions ──
   setPlayer: (p: PlayerProfile) => void
@@ -124,6 +125,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   characterStates: {},
   knownWhereabouts: [],
   presenceNow: {},
+  upcomingRendezvous: [],
 
   sceneChats: {},
   phoneOpen: false,
@@ -488,6 +490,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     characterStates: payload.character_states || {},
     knownWhereabouts: payload.known_whereabouts || [],
     presenceNow: payload.presence_now || {},
+    upcomingRendezvous: payload.upcoming_rendezvous || [],
   }),
 
   toggleDebug: () => set({ showDebug: !get().showDebug }),
@@ -514,6 +517,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     characterStates: {},
     knownWhereabouts: [],
     presenceNow: {},
+    upcomingRendezvous: [],
     sceneChats: {},
     phoneOpen: false,
     phoneActiveChar: null,

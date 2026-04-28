@@ -197,8 +197,10 @@ class CharacterState:
     job: str = ""                        # role / occupation
     schedule: dict[str, str] = _field(default_factory=dict)
     overrides: dict[str, str] = _field(default_factory=dict)  # "<day>_<slot>" → loc_id
-    today_mood: str = ""                 # populated by daily tick (Phase 5, optional)
+    today_mood: str = ""                 # populated by daily tick
     intentions_toward_player: str = ""   # populated by daily tick
+    recent_event: str = ""               # 1-line "what happened to them today" — populated by daily tick
+    last_tick_day: int = 0               # last world.day the daily_tick ran for this char (avoid re-firing on same day)
     # How quickly this character opens up. Drives the narrative reaction cues
     # injected into the relationships block — does NOT change LoRA gating.
     # Valid values: "reserved" | "normal" | "wild". Defaults to "normal".
@@ -213,6 +215,8 @@ class CharacterState:
             "overrides": dict(self.overrides),
             "today_mood": self.today_mood,
             "intentions_toward_player": self.intentions_toward_player,
+            "recent_event": self.recent_event,
+            "last_tick_day": self.last_tick_day,
             "temperament": self.temperament,
         }
 
@@ -221,6 +225,10 @@ class CharacterState:
         _temp = str(data.get("temperament", "normal")).strip().lower()
         if _temp not in ("reserved", "normal", "wild"):
             _temp = "normal"
+        try:
+            _last_tick = int(data.get("last_tick_day", 0) or 0)
+        except (TypeError, ValueError):
+            _last_tick = 0
         return cls(
             code=str(data.get("code", "")),
             personality=str(data.get("personality", "")),
@@ -229,6 +237,8 @@ class CharacterState:
             overrides=dict(data.get("overrides", {})),
             today_mood=str(data.get("today_mood", "")),
             intentions_toward_player=str(data.get("intentions_toward_player", "")),
+            recent_event=str(data.get("recent_event", "")),
+            last_tick_day=_last_tick,
             temperament=_temp,
         )
 
@@ -290,3 +300,155 @@ def all_known_whereabouts(
 def set_rendezvous(state: CharacterState, day: int, slot: str, location_id: str) -> None:
     """Pin a character to a specific location-slot (rendez-vous accepted)."""
     state.overrides[f"{day}_{slot}"] = location_id
+
+
+# ─── Rendez-vous lifecycle helpers (Feature 1) ──────────────────────────────
+
+def slot_distance(from_day: int, from_slot: str, to_day: int, to_slot: str) -> int:
+    """Number of slots from (from_day, from_slot) to (to_day, to_slot).
+    Negative if the target is in the past, 0 if same, positive if future.
+    Assumes 4 slots per day (morning/afternoon/evening/night)."""
+    try:
+        f = SLOTS.index(from_slot)
+    except ValueError:
+        f = 0
+    try:
+        t = SLOTS.index(to_slot)
+    except ValueError:
+        t = 0
+    return (to_day - from_day) * len(SLOTS) + (t - f)
+
+
+def rendezvous_status(world: WorldState, rdv_day: int, rdv_slot: str) -> str:
+    """Return the lifecycle status of a rendez-vous relative to NOW.
+    - 'now':     happening this exact slot
+    - 'next':    one slot away (the player's current scene is the lead-up)
+    - 'soon':    2-4 slots away (visible as "upcoming" but not yet imminent)
+    - 'future':  more than one day away
+    - 'past':    already happened
+    """
+    d = slot_distance(world.day, world.slot, rdv_day, rdv_slot)
+    if d < 0:
+        return "past"
+    if d == 0:
+        return "now"
+    if d == 1:
+        return "next"
+    if d <= 4:
+        return "soon"
+    return "future"
+
+
+def imminent_rendezvous(world: WorldState, whereabouts: list[dict]) -> list[dict]:
+    """Filter known_whereabouts down to rendez-vous that are happening NOW or NEXT
+    slot. Each item gets a `status` field added. Used by the engine (force the
+    character into the scene) and by the map UI (RDV badge)."""
+    out: list[dict] = []
+    for w in whereabouts or []:
+        if not w.get("is_rendezvous"):
+            continue
+        try:
+            day = int(w.get("day", 0))
+        except (TypeError, ValueError):
+            continue
+        slot = str(w.get("slot", "")).strip().lower()
+        if slot not in SLOTS:
+            continue
+        status = rendezvous_status(world, day, slot)
+        if status in ("now", "next"):
+            out.append({**w, "status": status})
+    return out
+
+
+def player_was_at(world: WorldState, day: int, slot: str, location_id: str) -> bool:
+    """True if world.history records the player at (day, slot, location_id).
+    Also true if the player is currently there at that exact slot (history entry
+    is appended on arrival, so a present-slot stay is included)."""
+    for h in (world.history or []):
+        try:
+            if int(h.get("day", 0)) == int(day) and str(h.get("slot", "")) == slot and str(h.get("location", "")) == location_id:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def missed_rendezvous(world: WorldState, whereabouts: list[dict]) -> list[dict]:
+    """Past rendez-vous where the player was NOT at the location. Items NOT yet
+    flagged `missed=True` are returned (so the caller can apply the penalty
+    once and persist the flag).
+    """
+    out: list[dict] = []
+    for w in whereabouts or []:
+        if not w.get("is_rendezvous"):
+            continue
+        if w.get("missed") or w.get("kept"):
+            continue  # already adjudicated
+        try:
+            day = int(w.get("day", 0))
+        except (TypeError, ValueError):
+            continue
+        slot = str(w.get("slot", "")).strip().lower()
+        if slot not in SLOTS:
+            continue
+        if rendezvous_status(world, day, slot) != "past":
+            continue
+        loc_id = str(w.get("location_id", "")).strip()
+        if player_was_at(world, day, slot, loc_id):
+            continue  # player kept the date — handled separately
+        out.append(w)
+    return out
+
+
+def adjudicate_past_rendezvous(world: WorldState, whereabouts: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Walk every PAST rendez-vous and split into (missed, kept) lists. Mutates
+    the source dicts to add `missed=True` or `kept=True` so they're never
+    re-counted. Caller is responsible for persisting the updated whereabouts.
+    """
+    missed: list[dict] = []
+    kept: list[dict] = []
+    for w in whereabouts or []:
+        if not w.get("is_rendezvous"):
+            continue
+        if w.get("missed") or w.get("kept"):
+            continue
+        try:
+            day = int(w.get("day", 0))
+        except (TypeError, ValueError):
+            continue
+        slot = str(w.get("slot", "")).strip().lower()
+        if slot not in SLOTS:
+            continue
+        if rendezvous_status(world, day, slot) != "past":
+            continue
+        loc_id = str(w.get("location_id", "")).strip()
+        if player_was_at(world, day, slot, loc_id):
+            w["kept"] = True
+            kept.append(w)
+        else:
+            w["missed"] = True
+            missed.append(w)
+    return missed, kept
+
+
+def upcoming_rendezvous(world: WorldState, whereabouts: list[dict]) -> list[dict]:
+    """Same as imminent_rendezvous but includes 'soon' and 'future' too — used
+    by the map UI to show ALL pending appointments, not just the imminent ones."""
+    out: list[dict] = []
+    for w in whereabouts or []:
+        if not w.get("is_rendezvous"):
+            continue
+        try:
+            day = int(w.get("day", 0))
+        except (TypeError, ValueError):
+            continue
+        slot = str(w.get("slot", "")).strip().lower()
+        if slot not in SLOTS:
+            continue
+        status = rendezvous_status(world, day, slot)
+        if status == "past":
+            continue
+        out.append({**w, "status": status})
+    # Sort by absolute slot index (soonest first)
+    out.sort(key=lambda x: slot_distance(world.day, world.slot, int(x["day"]), x["slot"]))
+    return out

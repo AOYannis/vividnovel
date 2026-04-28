@@ -439,17 +439,21 @@ async def extract_whereabouts(
     char_codes_str = ", ".join(f"`{c}`" for c in char_codes)
     sys_msg = (
         "You read a short interactive-novel scene and extract any FUTURE-self "
-        "statements characters make about where they'll be. Output strict JSON. "
-        "Be conservative — only extract explicit statements ('I'll be at X', "
-        "'see you tomorrow at Y'), NOT vague hints. If nothing qualifies, "
-        "return an empty array."
+        "statements characters make about where they'll be. You ALSO flag whether "
+        "each is a 'rendez-vous' — a MUTUAL appointment with the player ('see you "
+        "tomorrow at the bar', 'meet me at the park at 8pm') vs a one-sided "
+        "whereabout ('I'll be at the gym tomorrow', 'I work at the cafe in the "
+        "mornings'). When a location is mentioned that ISN'T in the existing list, "
+        "you may PROPOSE a new location. Output strict JSON. Be conservative — only "
+        "extract explicit statements, NOT vague hints. If nothing qualifies, return "
+        "an empty array."
     )
     user_msg = f"""Current day: {current_day}, current slot: {current_slot}.
 
 Characters in scope (only extract for these codenames):
 {char_codes_str}
 
-Available locations (use ONLY these IDs):
+Available locations (use ONLY these IDs unless you propose a new one — see below):
 {loc_lines}
 
 Scene text:
@@ -460,10 +464,17 @@ Output a JSON object with key "mentions" → an array of objects:
   "mentions": [
     {{
       "char": "<codename, must be in scope>",
-      "location_id": "<must be in available locations>",
+      "location_id": "<must match an available id OR a `new_location.id` you propose below>",
       "day": <integer day number, e.g. {current_day} or {current_day + 1}>,
       "slot": "<morning|afternoon|evening|night>",
-      "source": "<short verbatim quote or paraphrase, max 80 chars>"
+      "source": "<short verbatim quote or paraphrase, max 80 chars>",
+      "is_rendezvous": <true if this is a MUTUAL appointment (player + character agree to meet), false if it is just the character announcing where they will be>,
+      "new_location": null  OR  {{
+        "id": "<lowercase_snake_case_id, must NOT clash with existing ids above>",
+        "name": "<display name, themed to the setting>",
+        "type": "<home|cafe|bar|club|gym|park|work|salon|other>",
+        "description": "<one short sentence>"
+      }}
     }}
   ]
 }}
@@ -475,6 +486,16 @@ Rules:
 - If a relative time is mentioned ("demain", "tomorrow"), convert to absolute day number.
 - "Ce soir" / "tonight" → day {current_day}, slot "evening" (only if current slot is morning/afternoon).
 - If you can't pin down BOTH a location AND a day+slot, skip the mention.
+- `is_rendezvous=true` ONLY when the line is a MUTUAL agreement: "Rendez-vous demain matin au café",
+  "On se retrouve à 20h au bar", "Viens me voir au studio mardi", "See you at the gym tomorrow".
+  The player's response/choice should imply acceptance, OR the language should be unambiguous about
+  meeting the player (NOT a third-party meeting).
+- `is_rendezvous=false` when it's just informational: "Je serai au boulot demain", "I work mornings at
+  the cafe" — useful to know, but no commitment to meet.
+- `new_location`: ONLY propose a new location when the scene mentions a SPECIFIC place that
+  isn't in the existing list AND has a clear identity ("le nouveau bar du Marais Le Sphinx",
+  "ma cabane à la plage de Belle-Île"). Set `location_id` to that new id. NEVER duplicate an
+  existing place under a new name. NEVER propose for vague mentions ("un café", "la plage").
 - Empty array if nothing qualifies. NO commentary."""
 
     try:
@@ -511,17 +532,149 @@ Rules:
             continue
         if char not in valid_chars:
             continue
-        if loc_id not in valid_locs:
+        # Allow location_id to refer to a NEW location proposed inline
+        new_loc_payload = m.get("new_location") if isinstance(m.get("new_location"), dict) else None
+        if loc_id not in valid_locs and not new_loc_payload:
             continue
         if slot not in SLOT_NAMES:
             continue
         if day < current_day:
             continue   # future-only
-        cleaned.append({
+        entry = {
             "char": char,
             "location_id": loc_id,
             "day": day,
             "slot": slot,
             "source": source,
-        })
+            "is_rendezvous": bool(m.get("is_rendezvous", False)),
+        }
+        if new_loc_payload:
+            # Sanitise the proposed new location. Engine will register it on the
+            # world before this whereabouts becomes useful.
+            new_id = str(new_loc_payload.get("id", "")).strip().lower()
+            new_id = "".join(c if (c.isalnum() or c == "_") else "_" for c in new_id)
+            if new_id and new_id[0].isalpha() and new_id == loc_id and new_id not in valid_locs:
+                entry["new_location"] = {
+                    "id": new_id,
+                    "name": str(new_loc_payload.get("name", new_id))[:80],
+                    "type": str(new_loc_payload.get("type", "other")).lower()[:20],
+                    "description": str(new_loc_payload.get("description", ""))[:200],
+                }
+            elif new_id != loc_id or new_id in valid_locs:
+                # Mismatched / already-existing → drop the proposal but keep the
+                # mention only if the loc_id is valid; otherwise skip the entry.
+                if loc_id not in valid_locs:
+                    continue
+        cleaned.append(entry)
     return cleaned
+
+
+# ─── Daily tick (Phase 5) ─────────────────────────────────────────────────
+
+async def daily_tick(
+    grok_client,
+    character_states: dict[str, CharacterState],
+    relationships: dict[str, dict],
+    day: int,
+    setting_label: str,
+    custom_setting_text: str = "",
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+) -> dict[str, dict]:
+    """Advance each cast member's inner life by one day.
+
+    For every character whose `last_tick_day < day`, ask Grok for an updated
+    `today_mood`, `intentions_toward_player`, and a 1-line `recent_event`
+    (what they did off-screen). The narrator reads these from the cast
+    block to drive nuanced reactions instead of static personality.
+
+    Returns `{code: {today_mood, intentions_toward_player, recent_event}}`
+    — caller is responsible for writing them back onto the CharacterState
+    objects and updating `last_tick_day`.
+
+    Cost: ~200 input + ~80 output tokens per character (~$0.00005 each on
+    Grok 4.1 Fast). For a 4-character cast: ~$0.0002 once per game day.
+    """
+    if not character_states or day <= 0:
+        return {}
+    eligible = [
+        (code, cs) for code, cs in character_states.items()
+        if (cs.last_tick_day or 0) < day
+    ]
+    if not eligible:
+        return {}
+
+    setting_blurb = setting_label
+    if custom_setting_text:
+        setting_blurb += f" — {custom_setting_text[:200]}"
+
+    sys_msg = (
+        "You write a one-day-later inner update for ONE adult NPC. Output strict JSON. "
+        "The character lives in a slice-of-life world; their mood and intentions toward "
+        "the player should drift naturally based on personality, current relationship "
+        "state, and what plausibly happened to them off-screen yesterday. Be concrete "
+        "and grounded — no melodrama unless the relationship state warrants it."
+    )
+
+    async def _tick_one(code: str, cs: CharacterState) -> tuple[str, dict]:
+        rel = (relationships or {}).get(code) or {}
+        level = int(rel.get("level", 0) or 0)
+        scenes = int(rel.get("scenes", 0) or 0)
+        last_mood = rel.get("last_mood", "neutral")
+        prev_mood = cs.today_mood or "(none yet)"
+        prev_intent = cs.intentions_toward_player or "(none yet)"
+        prev_event = cs.recent_event or "(none yet)"
+        user_msg = f"""Setting: {setting_blurb}
+Character codename: {code}
+Personality: {cs.personality or '—'}
+Job: {cs.job or '—'}
+Temperament: {cs.temperament}
+Today is day {day} of the game.
+
+Current relationship with the player:
+- level: {level} (0 stranger → 5 lover)
+- scenes shared: {scenes}
+- last visual mood (from prev scene): {last_mood}
+
+Previous-day state (what you previously assigned):
+- mood: "{prev_mood}"
+- intentions_toward_player: "{prev_intent}"
+- last recent_event: "{prev_event}"
+
+Produce a JSON object (no markdown, no commentary):
+{{
+  "today_mood": "<one short phrase, max 80 chars — fits the personality + temperament + relationship arc>",
+  "intentions_toward_player": "<one short phrase, max 100 chars — what they want from / want to do with the player today>",
+  "recent_event": "<one short sentence, max 120 chars — what plausibly happened to them OFF-SCREEN yesterday: a small life beat (a meeting, a realisation, a phone call, a routine moment with a colleague), grounded in their job/personality. NOT about the player.>"
+}}
+
+Drift rules:
+- moods should EVOLVE — don't repeat the previous mood verbatim.
+- if relationship level is high (3+), intentions can include desire / wanting to see the player.
+- if level is 0 and scenes is 0, intentions are about their own life, NOT the player.
+- recent_event should never claim the character met / saw the player; it's their PRIVATE life.
+- write in the same language as the setting if obvious, else English."""
+        try:
+            resp = await grok_client.chat.completions.create(
+                model=grok_model,
+                messages=[
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": user_msg},
+                ],
+                temperature=0.85,
+                max_tokens=300,
+                response_format={"type": "json_object"},
+            )
+            raw = resp.choices[0].message.content or "{}"
+            data = json.loads(raw)
+        except Exception as e:
+            print(f"[agent] daily_tick({code}) failed: {e}")
+            return code, {}
+        return code, {
+            "today_mood": str(data.get("today_mood", "")).strip()[:120],
+            "intentions_toward_player": str(data.get("intentions_toward_player", "")).strip()[:160],
+            "recent_event": str(data.get("recent_event", "")).strip()[:200],
+        }
+
+    import asyncio
+    results = await asyncio.gather(*[_tick_one(code, cs) for code, cs in eligible])
+    return {code: payload for code, payload in results if payload}

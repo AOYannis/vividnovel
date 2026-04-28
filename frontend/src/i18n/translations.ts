@@ -160,6 +160,12 @@ const translations: Record<string, Record<string, string>> = {
     'map.go_elsewhere_choice': 'Aller ailleurs (carte)',
     'map.move_choice_prefix': 'Aller ailleurs',
     'map.not_active': "Le mode slice-of-life n'est pas activé pour cette session.",
+    'map.rdv': 'RDV',
+    'map.rdv_now': 'maintenant',
+    'map.rdv_next': 'prochain créneau',
+    'map.rdv_soon': 'bientôt',
+    'map.rdv_future': 'à venir',
+    'map.rdv_with': 'avec',
   },
 
   // ── English ──
@@ -310,6 +316,12 @@ const translations: Record<string, Record<string, string>> = {
     'map.go_elsewhere_choice': 'Go elsewhere (map)',
     'map.move_choice_prefix': 'Go elsewhere',
     'map.not_active': 'Slice-of-life mode is not active for this session.',
+    'map.rdv': 'RDV',
+    'map.rdv_now': 'now',
+    'map.rdv_next': 'next slot',
+    'map.rdv_soon': 'soon',
+    'map.rdv_future': 'later',
+    'map.rdv_with': 'with',
   },
 
   // ── Spanish ──

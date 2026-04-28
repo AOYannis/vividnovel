@@ -47,6 +47,9 @@ def build_system_prompt(
     world=None,
     character_states: dict | None = None,
     present_characters: list[str] | None = None,
+    rendezvous_here_now: list[dict] | None = None,
+    rendezvous_next: list[dict] | None = None,
+    recent_missed_rendezvous: list[dict] | None = None,
 ) -> str:
     """Build the narrator's system prompt.
 
@@ -74,6 +77,9 @@ def build_system_prompt(
             world=world,
             character_states=character_states,
             present_characters=present_characters,
+            rendezvous_here_now=rendezvous_here_now,
+            rendezvous_next=rendezvous_next,
+            recent_missed_rendezvous=recent_missed_rendezvous,
         )
     return _build_classic_prompt(**common_args)
 
@@ -374,7 +380,12 @@ def _section_image_handoff() -> str:
         "- `scene_summary` (1-2 phrases dans la langue de narration) : ce qui SE PASSE — qui fait quoi,\n"
         "  langage corporel, émotion clé. PAS de direction caméra, PAS de vocabulaire d'éclairage.\n"
         "- `shot_intent` (1 ligne courte) : intention de cadrage/ton (« gros plan intime »,\n"
-        "  « plan atmosphérique large », « over-the-shoulder tendu », « macro de deux mains »).\n"
+        "  « plan atmosphérique large », « macro de deux mains »).\n"
+        "  ⛔ JAMAIS de plan tiers du joueur : pas de « plan arrière », pas de « silhouette du\n"
+        "     joueur », pas de « over-the-shoulder du protagoniste », pas de « plan large sur\n"
+        "     le personnage ». La caméra EST les yeux du joueur — il n'a ni dos, ni visage, ni\n"
+        "     silhouette dans le cadre. Pour un moment contemplatif, demande un plan large du\n"
+        "     PAYSAGE qu'il regarde, pas de lui le regardant.\n"
         "- `mood` (UN nom canonique) : `neutral` par défaut. Sinon, le mood SPÉCIFIQUE.\n"
         "- `actors_present` : codenames du casting visibles (vide [] = aucun acteur LoRA, mais\n"
         "  une scène avec PNJ non-LoRA reste valide — décris-les dans `scene_summary`).\n"
@@ -621,6 +632,9 @@ def _slice_sequence_context(
     character_states: dict | None,
     present_characters: list[str] | None,
     cast_codes_list: str,
+    rendezvous_here_now: list[dict] | None = None,
+    rendezvous_next: list[dict] | None = None,
+    recent_missed_rendezvous: list[dict] | None = None,
 ) -> str:
     loc = world.location_by_id(world.current_location)
     loc_name = loc.name if loc else world.current_location or "?"
@@ -679,6 +693,77 @@ def _slice_sequence_context(
     if previous_choice:
         out += f"Le joueur vient de choisir : « {previous_choice} »\n\n"
 
+    # ── Missed rendez-vous consequences ──────────────────────────────
+    # If the player skipped a rendez-vous (was elsewhere when they should have
+    # met someone), the next encounter with that character should reflect it
+    # — coldness, sarcasm, or genuine hurt depending on temperament. The list
+    # is one-shot: surfaced once then cleared by the engine.
+    if recent_missed_rendezvous:
+        missed_lines = []
+        for w in recent_missed_rendezvous:
+            cs = (character_states or {}).get(w.get("char")) if character_states else None
+            temperament = (getattr(cs, "temperament", "normal") if cs else "normal") or "normal"
+            src = (w.get("source") or "").strip()
+            quote = f' (« {src} »)' if src else ""
+            missed_lines.append(
+                f"- **{w.get('char')}** [tempérament `{temperament}`] : "
+                f"jour {w.get('day')} · {w.get('slot')} au lieu `{w.get('location_id')}`{quote}"
+            )
+        out += (
+            f"### 💔 RENDEZ-VOUS MANQUÉ — conséquence narrative\n"
+            f"Le joueur n'a PAS honoré ces rendez-vous précédents :\n"
+            + "\n".join(missed_lines) +
+            f"\n\nSi tu fais apparaître un de ces personnages dans cette séquence, traite ce manqué "
+            f"comme un VRAI ENJEU : ne fais pas comme si rien ne s'était passé. La réaction varie selon "
+            f"le tempérament : `reserved` → froideur silencieuse, regards évités ; `normal` → "
+            f"reproche lucide, demande d'explication ; `wild` → pique sarcastique ou indifférence "
+            f"affichée. Le joueur a déjà perdu UN niveau de relation avec eux automatiquement ; "
+            f"à toi de mettre cette perte en SCÈNE pour qu'il ressente le poids de son choix.\n"
+            f"\n"
+        )
+
+    # ── Rendez-vous notice (Feature 1) ──────────────────────────────
+    # When the player has a confirmed rendez-vous AT this location AND it's NOW,
+    # the character is forcibly placed in present_characters. Tell the narrator
+    # so the meeting plays out instead of being just an "encounter".
+    if rendezvous_here_now:
+        rdv_lines = []
+        for r in rendezvous_here_now:
+            src = (r.get("source") or "").strip()
+            cs = (character_states or {}).get(r.get("char")) if character_states else None
+            persona = getattr(cs, "personality", "") if cs else ""
+            extra = f" — {persona}" if persona else ""
+            quote = f'  Source : « {src} »' if src else ""
+            rdv_lines.append(f"- **{r.get('char')}**{extra}\n{quote}")
+        out += (
+            f"### ⏰ RENDEZ-VOUS — MAINTENANT, ICI\n"
+            f"Le joueur arrive à un rendez-vous qu'il a accepté précédemment :\n"
+            + "\n".join(rdv_lines) +
+            f"\n\nFais arriver / accueillir ce(s) personnage(s) DANS cette séquence — c'est un moment "
+            f"attendu, traite-le avec la tension d'un vrai rendez-vous (anticipation, premier regard, "
+            f"reconnaissance, légère gêne ou complicité, selon le tempérament). NE PAS faire comme "
+            f"s'il s'agissait d'une rencontre fortuite.\n"
+            f"\n"
+        )
+
+    # Imminent rendez-vous (NEXT slot) → set up anticipation as a teaser
+    elif rendezvous_next:
+        teaser_lines = []
+        for r in rendezvous_next:
+            cs = (character_states or {}).get(r.get("char")) if character_states else None
+            persona = getattr(cs, "personality", "") if cs else ""
+            extra = f" ({persona})" if persona else ""
+            teaser_lines.append(f"- {r.get('char')}{extra} au lieu `{r.get('location_id')}`")
+        out += (
+            f"### ⏳ Rendez-vous imminent (prochain créneau)\n"
+            f"Un rendez-vous attend le joueur au prochain créneau :\n"
+            + "\n".join(teaser_lines) +
+            f"\nTu peux l'évoquer subtilement (un coup d'œil à l'heure, un message qui rappelle, "
+            f"un sentiment d'anticipation) — sans le faire se produire ici. Le joueur doit AVOIR ENVIE "
+            f"d'y aller avec un de tes choix de fin.\n"
+            f"\n"
+        )
+
     if moved_via_map:
         out += (
             f"### ⚠️ LE JOUEUR S'EST DÉPLACÉ SEUL\n"
@@ -695,9 +780,10 @@ def _slice_sequence_context(
                 if cs:
                     mood_line = f" · humeur du jour : {cs.today_mood}" if cs.today_mood else ""
                     intent_line = f" · envies envers le joueur : {cs.intentions_toward_player}" if cs.intentions_toward_player else ""
+                    event_line = f"\n  Hier (off-screen) : {cs.recent_event}" if getattr(cs, 'recent_event', '') else ""
                     out += (
                         f"- **{code}** ({cs.personality or 'no profile'}, {cs.job or 'no job'})"
-                        f"{mood_line}{intent_line}\n"
+                        f"{mood_line}{intent_line}{event_line}\n"
                     )
                 else:
                     out += f"- **{code}**\n"
@@ -974,6 +1060,9 @@ def _build_slice_prompt(
     world,
     character_states: dict | None,
     present_characters: list[str] | None,
+    rendezvous_here_now: list[dict] | None = None,
+    rendezvous_next: list[dict] | None = None,
+    recent_missed_rendezvous: list[dict] | None = None,
 ) -> str:
     # Sequence 0 in slice mode → INTRO prompt (atmospheric tour at home, props
     # hint at the other world locations, end choices = those destinations).
@@ -1037,6 +1126,9 @@ def _build_slice_prompt(
         _slice_sequence_context(
             world, previous_choice, custom_setting_text,
             character_states, present_characters, cast_codes_list,
+            rendezvous_here_now=rendezvous_here_now,
+            rendezvous_next=rendezvous_next,
+            recent_missed_rendezvous=recent_missed_rendezvous,
         )
     )
     _push(dynamic_sections, _section_custom_instructions(custom_instructions))

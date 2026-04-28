@@ -61,6 +61,7 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
   const knownWhereabouts = useGameStore((s) => s.knownWhereabouts)
   const presenceNow = useGameStore((s) => s.presenceNow)
   const characterNames = useGameStore((s) => s.characterNames)
+  const upcomingRendezvous = useGameStore((s) => s.upcomingRendezvous)
   const setWorldPayload = useGameStore((s) => s.setWorldPayload)
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -141,6 +142,41 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
           </button>
         </div>
 
+        {/* Imminent rendez-vous teaser — top of modal so the player sees it first */}
+        {upcomingRendezvous && upcomingRendezvous.some((r) => r.status === 'now' || r.status === 'next') && (
+          <div className="px-4 pt-3 pb-1">
+            <div className="text-[10px] text-rose-400/80 uppercase tracking-wider mb-1.5 font-mono">
+              ⏰ {t('map.rdv')}
+            </div>
+            <div className="space-y-1.5">
+              {upcomingRendezvous.filter((r) => r.status === 'now' || r.status === 'next').map((r, i) => {
+                const loc = world.locations.find((l) => l.id === r.location_id)
+                const statusLabel = r.status === 'now' ? t('map.rdv_now') : t('map.rdv_next')
+                const statusColor = r.status === 'now'
+                  ? 'border-rose-500/50 bg-rose-950/30 text-rose-200'
+                  : 'border-amber-700/40 bg-amber-950/20 text-amber-200'
+                return (
+                  <div
+                    key={`rdv-now-${r.char}-${r.day}-${r.slot}-${i}`}
+                    className={`text-[11px] border rounded px-3 py-2 ${statusColor}`}
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[9px] uppercase tracking-wider opacity-80">{statusLabel}</span>
+                      <span className="text-neutral-400">{t('map.rdv_with')}</span>
+                      <span className="font-mono font-semibold">{shortName(r.char, characterNames)}</span>
+                      <span className="text-neutral-500">·</span>
+                      <span>{loc?.name || r.location_id}</span>
+                    </div>
+                    {r.source && (
+                      <div className="text-[10px] opacity-70 italic mt-0.5">« {r.source} »</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Locations */}
         <div className="p-4 space-y-2">
           <p className="text-[11px] text-neutral-500 mb-3">
@@ -152,6 +188,9 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
             const isPending = pending === loc.id
             // Likely-present characters at this location right now (resolver output)
             const charsHere = (presenceNow[loc.id] || []).filter((c) => c in characterStates)
+            // Rendez-vous with status that target THIS location (any future status)
+            const rdvHere = (upcomingRendezvous || []).filter((r) => r.location_id === loc.id)
+            const hasImminentRdv = rdvHere.some((r) => r.status === 'now' || r.status === 'next')
             return (
               <button
                 key={loc.id}
@@ -160,7 +199,9 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
                 className={`w-full text-left rounded-xl border px-4 py-3 transition-colors ${
                   isCurrent
                     ? 'border-amber-700/50 bg-amber-950/20 text-amber-300'
-                    : 'border-neutral-800 bg-neutral-900 text-neutral-200 hover:border-emerald-800/50 hover:bg-emerald-950/20 disabled:opacity-40 disabled:cursor-not-allowed'
+                    : hasImminentRdv
+                      ? 'border-rose-700/50 bg-rose-950/15 text-neutral-200 hover:border-rose-600/70 hover:bg-rose-950/30 disabled:opacity-40 disabled:cursor-not-allowed'
+                      : 'border-neutral-800 bg-neutral-900 text-neutral-200 hover:border-emerald-800/50 hover:bg-emerald-950/20 disabled:opacity-40 disabled:cursor-not-allowed'
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -169,6 +210,11 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
                     <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
                       {loc.name}
                       {isCurrent && <span className="text-[9px] uppercase tracking-wider text-amber-500">{t('map.you_are_here')}</span>}
+                      {hasImminentRdv && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-900/50 text-rose-200 border border-rose-700/50 font-mono uppercase tracking-wider">
+                          ⏰ {t('map.rdv')}
+                        </span>
+                      )}
                       {charsHere.map((c) => (
                         <span
                           key={c}
@@ -205,20 +251,26 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
               {futureWhereabouts.map((w, i) => {
                 const loc = world.locations.find((l) => l.id === w.location_id)
                 const dayLabel = w.day === world.day ? t('map.agenda_today') : `${t('map.agenda_day_short')}${w.day}`
+                const isRdv = !!w.is_rendezvous
                 return (
                   <div
                     key={`${w.char}-${w.day}-${w.slot}-${w.location_id}-${i}`}
-                    className="text-[11px] text-neutral-400 bg-neutral-900/60 border border-neutral-800/60 rounded px-3 py-1.5"
+                    className={`text-[11px] rounded px-3 py-1.5 ${
+                      isRdv
+                        ? 'text-rose-200 bg-rose-950/25 border border-rose-800/40'
+                        : 'text-neutral-400 bg-neutral-900/60 border border-neutral-800/60'
+                    }`}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-emerald-400 font-mono">{shortName(w.char, characterNames)}</span>
+                      {isRdv && <span className="text-[9px] uppercase tracking-wider text-rose-400/80 font-mono">⏰ {t('map.rdv')}</span>}
+                      <span className={isRdv ? 'text-rose-300 font-mono' : 'text-emerald-400 font-mono'}>{shortName(w.char, characterNames)}</span>
                       <span className="text-neutral-600">·</span>
                       <span>{dayLabel} {SLOT_LABEL[w.slot]}</span>
                       <span className="text-neutral-600">·</span>
-                      <span className="text-neutral-300">{loc?.name || w.location_id}</span>
+                      <span className={isRdv ? 'text-rose-100' : 'text-neutral-300'}>{loc?.name || w.location_id}</span>
                     </div>
                     {w.source && (
-                      <div className="text-[10px] text-neutral-600 italic mt-0.5">« {w.source} »</div>
+                      <div className={`text-[10px] italic mt-0.5 ${isRdv ? 'text-rose-300/70' : 'text-neutral-600'}`}>« {w.source} »</div>
                     )}
                   </div>
                 )

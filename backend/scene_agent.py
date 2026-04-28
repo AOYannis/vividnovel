@@ -19,6 +19,48 @@ BANNED_WORDS = (
     "you", "your", "viewer", "same as before", "previous",
 )
 
+# Phrases in shot_intent that invite a third-person shot of the player. Even
+# with the system-prompt ban, Grok writes things like "plan arrière silhouette"
+# and the specialist composes obediently. We sanitize before passing.
+import re as _re
+_BACKSHOT_PATTERNS = [
+    _re.compile(r"\b(plan\s+arri[èe]re|plan\s+de\s+dos|de\s+dos|dos\s+tourn[ée]?)\b", _re.IGNORECASE),
+    _re.compile(r"\b(silhouette\s+(du|de\s+la)\s+(joueur|protagoniste|personnage|h[ée]ros))\b", _re.IGNORECASE),
+    _re.compile(r"\b(silhouette\s+solitaire|silhouette\s+contemplative)\b", _re.IGNORECASE),
+    _re.compile(r"\b(over[-\s]?the[-\s]?shoulder)\b", _re.IGNORECASE),
+    _re.compile(r"\b(rear\s+shot|back\s+shot|from\s+behind\s+(the|a)\s+(player|protagonist|figure|man|woman|character))\b", _re.IGNORECASE),
+    _re.compile(r"\b(wide\s+shot\s+(of|on)\s+(the\s+)?(player|protagonist|figure|man|woman|character))\b", _re.IGNORECASE),
+]
+
+
+# Face / visage close-up patterns. When NO cast actor is in the frame, any
+# face close-up necessarily targets the player → broken POV. Only triggered
+# for scenes with empty `actors_present`.
+_PLAYER_FACE_PATTERNS = [
+    _re.compile(r"\b(gros\s+plan\s+facial|gros\s+plan\s+sur\s+(le|son|ses)\s+(visage|yeux|bouche)|plan\s+facial)\b", _re.IGNORECASE),
+    _re.compile(r"\b(close[-\s]?up\s+(of|on)\s+(the\s+|his\s+|her\s+)?(face|eyes|mouth)|facial\s+close[-\s]?up)\b", _re.IGNORECASE),
+]
+
+
+def _sanitize_shot_intent(intent: str, actors_present: list[str] | None = None) -> str:
+    """Strip player-third-person-shot patterns from the narrator's shot_intent so
+    the specialist isn't tempted to compose a back-shot or face close-up of the
+    player. Replace stripped fragments with a POV-safe alternative.
+
+    `actors_present` is used to gate face-close-up sanitisation: when at least
+    one cast actor is in frame, "gros plan facial" likely targets THEM (legitimate);
+    when empty, it can only mean the player's face (broken POV)."""
+    if not intent:
+        return intent
+    out = intent
+    for pat in _BACKSHOT_PATTERNS:
+        out = pat.sub("plan large POV (paysage / décor)", out)
+    if not actors_present:
+        for pat in _PLAYER_FACE_PATTERNS:
+            out = pat.sub("plan POV serré sur objet / détail (mains, eau, etc.)", out)
+    out = _re.sub(r"\s{2,}", " ", out).strip(" ,;.")
+    return out
+
 
 SYSTEM_PROMPT = """You are an image-prompt specialist for an interactive adult visual novel.
 Your only job: turn a short scene spec into ONE self-contained Z-Image Turbo prompt
@@ -31,14 +73,32 @@ Your only job: turn a short scene spec into ONE self-contained Z-Image Turbo pro
 - NEVER write a mood name (kiss, sensual_tease, blowjob, missionary, etc.) inside the prompt — those are technical
   parameters, not visual keywords.
 
-# POV — first-person, player's eyes
+# POV — first-person, player's eyes — STRICT
 EVERY image is shot from the player's eyes. Camera = player's eyes.
 - Open the prompt EARLY with a POV marker: `POV first-person`, `eye-level POV`,
   `seen from a first-person perspective`, `looking down`, `looking across`, etc.
 - NEVER describe a third-person wide shot of two full bodies side by side.
 - If the male player has physical presence in the scene, only his **hands, forearms,
-  lower torso** may enter at the frame edges (as if he was looking at them through the camera) — NEVER his full face or body.
+  lower torso** may enter at the frame edges (as if he was looking at them through the
+  camera) — NEVER his full face or body.
 - If the player is not male, same rule: his/her body is the camera, never a tiered subject.
+
+## ⛔ The player is NEVER a SUBJECT of the frame
+Even if the narrator's `shot_intent` invites one of these — REJECT IT and re-frame as POV:
+- "from behind a figure", "the player from behind", "back turned", "silhouetted figure",
+  "broad shoulders against the X", "rear shot", "over-the-shoulder of the protagonist"
+- "his face", "his hair", "his jawline", "stubble on his chin", "his eyes"
+- "a man / a male figure / the protagonist standing / sitting / contemplating"
+NEVER write any of these about the player. The player has no visible face, no visible
+back, no visible silhouette — he/she is the camera. If the narrator asks for a wide
+contemplative shot, render the LANDSCAPE the player is contemplating (looking outward
+across the dunes / cityscape / room) — not the player's body.
+
+POV-correct alternatives when the narrator wants atmosphere:
+- "POV first-person looking across the vast Tatooine dunes at night, twin moons low on
+   the horizon..." → camera is the player's eyes, scene is the landscape.
+- "POV first-person, hands resting on knees at frame bottom edge, looking out over
+   the water..." → only forearms/hands at edges, never face/back.
 
 # Structure — 4 layers (Camera Director Formula)
 Layer 1 — Subject & action: shot type + person (age, ethnicity, body, face) + clothing
@@ -238,6 +298,16 @@ async def craft_image_prompt(
     appearance_block = _format_appearance_block(actors_present, appearance_state or {})
     time_block = _format_time_of_day_block(time_of_day)
 
+    # Server-side defense: strip player-back-shot phrasing from the narrator's
+    # shot_intent before the specialist sees it. Otherwise Grok composes obediently
+    # ("from behind a solitary male figure...") and the POV is broken. Face
+    # close-ups when no actor is in scene are also stripped (the face would be
+    # the player's by elimination).
+    safe_shot_intent = _sanitize_shot_intent(shot_intent or "", actors_present)
+    if safe_shot_intent != (shot_intent or ""):
+        print(f"[scene_agent] sanitised shot_intent for scene {scene_index}: "
+              f"{shot_intent!r} → {safe_shot_intent!r}")
+
     setting_line = setting_label or "(unspecified setting)"
     if custom_setting_text:
         setting_line += f" — custom: {custom_setting_text[:300]}"
@@ -254,7 +324,7 @@ Narrator summary (what is happening in this 10-second beat):
 {scene_summary or '(no summary provided)'}
 
 Shot intent (camera/tone hint from the narrator):
-{shot_intent or '(no specific intent — pick a fitting shot)'}
+{safe_shot_intent or '(no specific intent — pick a fitting shot)'}
 
 Characters visible in this image:
 {actor_block}
