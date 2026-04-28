@@ -414,6 +414,30 @@ export async function getSessionMemories(sessionId: string) {
   return res.json()
 }
 
+export interface Mem0Item {
+  id?: string
+  memory: string
+  created_at?: string
+  updated_at?: string
+  metadata?: any
+}
+
+export interface Mem0AllResponse {
+  mem0_enabled: boolean
+  session_id?: string
+  setting_id?: string
+  scopes?: {
+    session_narrative: { scope_id: string; memories: Mem0Item[] }
+    persistent: { scope_id: string; memories: Mem0Item[] }
+    per_character: Record<string, { scope_id: string; memories: Mem0Item[] }>
+  }
+}
+
+export async function getAllMem0(sessionId: string): Promise<Mem0AllResponse> {
+  const res = await apiFetch(`/api/debug/mem0/all/${sessionId}`)
+  return res.json()
+}
+
 export async function getVideoSettings(sessionId: string) {
   const res = await apiFetch(`/api/debug/video-settings/${sessionId}`)
   return (await res.json()).video_settings

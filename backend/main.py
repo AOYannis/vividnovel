@@ -464,6 +464,7 @@ def _build_world_payload(session) -> dict:
         "known_whereabouts": list(session.known_whereabouts or []),
         "presence_now": presence_now,
         "upcoming_rendezvous": upcoming,
+        "relationships": dict(session.relationships or {}),
     }
 
 
@@ -1283,6 +1284,76 @@ async def get_session_memories(session_id: str):
         "narrative_memory": narrative,
         "setting_id": session.setting,
         "sequence_number": session.sequence_number,
+    }
+
+
+@app.get("/api/debug/mem0/all/{session_id}")
+async def get_all_mem0_for_session(session_id: str, user: dict = Depends(get_current_user)):
+    """Dump every Mem0 namespace touched by this session — for the debug UI.
+
+    Returns four scopes:
+      - session_narrative: session-scoped narrative (gb<hash>) — facts from THIS game
+      - persistent: cross-session persistent (gbp<hash>) — facts shared across games (user+setting)
+      - per_character: per-character (gbc<hash>) — what each cast member "remembers" (user+setting+char)
+      - pool_seen: any pool actor codename that has memories stored (user might have introduced them)
+    """
+    from memory import (
+        _client as _mem0_client,
+        _user_session_id, _persistent_user_id, _character_memory_id,
+    )
+    session = get_user_session(session_id, user)
+    if not MEM0_ENABLED or _mem0_client is None:
+        return {"mem0_enabled": False, "scopes": {}}
+
+    def _list_for(uid: str) -> list[dict]:
+        try:
+            res = _mem0_client.get_all(filters={"user_id": uid})
+            items = res.get("results", []) if isinstance(res, dict) else []
+            # Trim to fields the UI cares about
+            out = []
+            for m in items:
+                if not m.get("memory"):
+                    continue
+                out.append({
+                    "id": m.get("id"),
+                    "memory": m.get("memory"),
+                    "created_at": m.get("created_at"),
+                    "updated_at": m.get("updated_at"),
+                    "metadata": m.get("metadata"),
+                })
+            return out
+        except Exception as e:
+            return [{"error": str(e)}]
+
+    # Compute all scope ids touched by this session
+    sess_uid = _user_session_id(session.user_id, session.id)
+    pers_uid = _persistent_user_id(session.user_id, session.setting)
+    cast_codes = list((session.cast or {}).get("actors", []) or [])
+
+    import asyncio
+    loop = asyncio.get_event_loop()
+    sess_items = await loop.run_in_executor(None, lambda: _list_for(sess_uid))
+    pers_items = await loop.run_in_executor(None, lambda: _list_for(pers_uid))
+
+    per_character = {}
+    for code in cast_codes:
+        if not code:
+            continue
+        char_uid = _character_memory_id(session.user_id, code, session.setting)
+        per_character[code] = {
+            "scope_id": char_uid,
+            "memories": await loop.run_in_executor(None, lambda c=char_uid: _list_for(c)),
+        }
+
+    return {
+        "mem0_enabled": True,
+        "session_id": session_id,
+        "setting_id": session.setting,
+        "scopes": {
+            "session_narrative": {"scope_id": sess_uid, "memories": sess_items},
+            "persistent": {"scope_id": pers_uid, "memories": pers_items},
+            "per_character": per_character,
+        },
     }
 
 

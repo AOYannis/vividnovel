@@ -569,6 +569,128 @@ Rules:
     return cleaned
 
 
+# ─── Bidirectional trust deltas ──────────────────────────────────────────
+
+async def extract_trust_deltas(
+    grok_client,
+    *,
+    previous_choice: str,
+    narration_text: str,
+    present_chars: list[str],
+    relationships: dict[str, dict],
+    character_states: dict[str, "CharacterState"],
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+) -> list[dict]:
+    """Read the player's last choice + the resulting sequence narration, decide
+    how each present character would feel about the player's behaviour, and
+    return one trust delta per character.
+
+    Returns a list of `{char, delta, reason}` dicts. `delta` is an INTEGER in
+    `[-3..+3]` (-3 = serious betrayal/rejection, 0 = neutral, +3 = profound
+    bonding moment). Empty list if nothing meaningful happened.
+
+    Cost: ~250 input + 80 output tokens per call (~$0.00006 on Grok 4.1 Fast).
+    Called once at end of each sequence where present_chars is non-empty.
+    """
+    if not present_chars:
+        return []
+    if not (narration_text or "").strip():
+        return []
+
+    char_lines = []
+    for code in present_chars:
+        cs = character_states.get(code)
+        rel = (relationships or {}).get(code) or {}
+        level = int(rel.get("level", 0) or 0)
+        temp = (getattr(cs, "temperament", "normal") if cs else "normal") or "normal"
+        persona = getattr(cs, "personality", "") if cs else ""
+        char_lines.append(
+            f"- `{code}` (level {level}, temperament `{temp}`): {persona or '(no persona)'}"
+        )
+    chars_block = "\n".join(char_lines)
+
+    sys_msg = (
+        "You read a short interactive-novel sequence and decide how each present "
+        "character felt about the PLAYER'S behaviour during it. Output strict JSON. "
+        "Be calibrated and conservative — most sequences should produce small or "
+        "zero deltas. Only +3 / -3 for genuinely defining moments (a real betrayal, "
+        "a real revelation, a profound act of trust). Most scenes drift in -1..+1."
+    )
+
+    user_msg = f"""Player's previous choice (what they JUST decided to do):
+"{previous_choice or '(none — sequence opened cold)'}"
+
+Resulting sequence narration:
+{(narration_text or '')[:3000]}
+
+Characters present in this sequence:
+{chars_block}
+
+For EACH character above, decide a trust delta in [-3..+3] based on what the
+PLAYER said/did/chose during the sequence (NOT based on what the character did).
+
+Calibration:
+- +3: profound act of trust, vulnerability, or genuine connection. Rare.
+- +2: clear positive signal (active listening, kindness, shared intimacy honoured properly).
+- +1: small good moment (a compliment landed well, a thoughtful gesture).
+-  0: neutral / nothing notable happened toward this character.
+- -1: minor friction (distracted, dismissive, slightly self-centred).
+- -2: clear bad signal (rude, broke a small confidence, emotional miss).
+- -3: serious betrayal, public humiliation, broken promise. Rare.
+
+Reason should be ONE short sentence quoting or describing the player's specific
+action that triggered the delta. NEVER attribute deltas to mood/scene type alone
+("they had sex, +3" is wrong — sex is mechanical, the trust comes from how the
+player handled it). Focus on choices and dialogue.
+
+Output strict JSON:
+{{
+  "deltas": [
+    {{"char": "<codename>", "delta": <int -3..3>, "reason": "<short sentence, max 100 chars>"}}
+  ]
+}}
+
+Only include characters with delta != 0. Empty array if nothing meaningful happened.
+NO commentary."""
+
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=grok_model,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=400,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content or "{}"
+        data = json.loads(raw)
+    except Exception as e:
+        print(f"[agent] extract_trust_deltas failed: {e}")
+        return []
+
+    deltas = data.get("deltas") or []
+    valid_chars = set(present_chars)
+    out: list[dict] = []
+    for d in deltas:
+        if not isinstance(d, dict):
+            continue
+        char = str(d.get("char", "")).strip()
+        if char not in valid_chars:
+            continue
+        try:
+            delta = int(d.get("delta", 0))
+        except (TypeError, ValueError):
+            continue
+        if delta == 0:
+            continue
+        delta = max(-3, min(3, delta))
+        reason = str(d.get("reason", "")).strip()[:140]
+        out.append({"char": char, "delta": delta, "reason": reason})
+    return out
+
+
 # ─── Daily tick (Phase 5) ─────────────────────────────────────────────────
 
 async def daily_tick(

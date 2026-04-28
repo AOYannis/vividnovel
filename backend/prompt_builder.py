@@ -780,10 +780,20 @@ def _slice_sequence_context(
                 if cs:
                     mood_line = f" · humeur du jour : {cs.today_mood}" if cs.today_mood else ""
                     intent_line = f" · envies envers le joueur : {cs.intentions_toward_player}" if cs.intentions_toward_player else ""
-                    event_line = f"\n  Hier (off-screen) : {cs.recent_event}" if getattr(cs, 'recent_event', '') else ""
+                    # Surface up to last 3 off-screen events (newest first) so the
+                    # narrator has a richer memory than just yesterday.
+                    events = list(getattr(cs, 'recent_events', []) or [])[-3:]
+                    if events:
+                        event_lines = "\n  Vie hors-scène (récente) :"
+                        for e in events:
+                            d = e.get("day", "?")
+                            t = (e.get("text") or "").strip()
+                            event_lines += f"\n    · J{d} : {t}"
+                    else:
+                        event_lines = ""
                     out += (
                         f"- **{code}** ({cs.personality or 'no profile'}, {cs.job or 'no job'})"
-                        f"{mood_line}{intent_line}{event_line}\n"
+                        f"{mood_line}{intent_line}{event_lines}\n"
                     )
                 else:
                     out += f"- **{code}**\n"

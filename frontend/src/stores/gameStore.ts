@@ -485,13 +485,16 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
 
   setCurrentScene: (scene) => set({ currentScene: scene }),
   setWorld: (w) => set({ world: w }),
-  setWorldPayload: (payload) => set({
+  setWorldPayload: (payload) => set((state) => ({
     world: payload.world,
     characterStates: payload.character_states || {},
     knownWhereabouts: payload.known_whereabouts || [],
     presenceNow: payload.presence_now || {},
     upcomingRendezvous: payload.upcoming_rendezvous || [],
-  }),
+    // The world payload now also carries relationships (trust, history, etc.).
+    // Merge so we don't clobber state when the field is absent.
+    relationships: payload.relationships ?? state.relationships,
+  })),
 
   toggleDebug: () => set({ showDebug: !get().showDebug }),
 

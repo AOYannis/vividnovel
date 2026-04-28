@@ -276,14 +276,24 @@ class StoryEngine:
 
             # ── Daily tick (Phase 5) ────────────────────────────────────
             # Advance each character's inner life ONCE per game day. Updates
-            # today_mood / intentions_toward_player / recent_event so the
-            # narrator gets a fresh signal to play with each new day.
+            # today_mood / intentions_toward_player and APPENDS to recent_events
+            # so the narrator has a richer multi-day off-screen log.
+            #
+            # Throttling: only tick characters who matter to the player —
+            #   - relationship.level >= 1 (they've been met), OR
+            #   - they appeared in any sequence's `world.history` recently
+            # Saves cost on large casts where most characters are never met.
             if session.world and session.character_states:
-                _needs_tick = any(
-                    (cs.last_tick_day or 0) < session.world.day
-                    for cs in session.character_states.values()
-                )
-                if _needs_tick:
+                from world import MAX_RECENT_EVENTS as _MAX_EVENTS
+                _eligible_codes = []
+                _rels = session.relationships or {}
+                for code, cs in session.character_states.items():
+                    if (cs.last_tick_day or 0) >= session.world.day:
+                        continue  # already ticked today
+                    rel_level = int((_rels.get(code) or {}).get("level", 0) or 0)
+                    if rel_level >= 1:
+                        _eligible_codes.append(code)
+                if _eligible_codes:
                     try:
                         from agent import daily_tick as _daily_tick
                         from config import SETTINGS as _SETTINGS
@@ -293,9 +303,11 @@ class StoryEngine:
                             or session.setting
                             or ""
                         )
+                        # Pass only the eligible subset so we don't pay for never-met chars
+                        _eligible_states = {c: session.character_states[c] for c in _eligible_codes}
                         _updates = await _daily_tick(
                             self.grok,
-                            session.character_states,
+                            _eligible_states,
                             session.relationships,
                             session.world.day,
                             _setting_label,
@@ -310,12 +322,16 @@ class StoryEngine:
                                 cs.today_mood = payload["today_mood"]
                             if payload.get("intentions_toward_player"):
                                 cs.intentions_toward_player = payload["intentions_toward_player"]
-                            if payload.get("recent_event"):
-                                cs.recent_event = payload["recent_event"]
+                            evt_text = (payload.get("recent_event") or "").strip()
+                            if evt_text:
+                                cs.recent_events.append({"day": session.world.day, "text": evt_text})
+                                # Trim from the head; keep last MAX_RECENT_EVENTS
+                                if len(cs.recent_events) > _MAX_EVENTS:
+                                    cs.recent_events = cs.recent_events[-_MAX_EVENTS:]
                             cs.last_tick_day = session.world.day
                             print(f"[tick] {code} (day {session.world.day}): "
                                   f"mood={cs.today_mood!r} intent={cs.intentions_toward_player!r} "
-                                  f"event={cs.recent_event[:60]!r}")
+                                  f"event={evt_text[:60]!r}")
                     except Exception as e:
                         print(f"[tick] daily_tick failed: {e}; characters keep yesterday's state")
 
@@ -895,6 +911,7 @@ class StoryEngine:
                                     session.relationships[actor_code] = {
                                         "level": 0, "encounters": 0, "scenes": 0,
                                         "intimate_scenes": 0, "last_mood": "neutral",
+                                        "trust": 0.0, "scene_mood_floor_level": 0,
                                     }
                                 rel = session.relationships[actor_code]
                                 rel["scenes"] += 1
@@ -905,16 +922,25 @@ class StoryEngine:
                                                    "reverse_cowgirl", "doggystyle", "spooning", "standing_sex",
                                                    "anal_doggystyle", "anal_missionary", "anal_missionary_shemale",
                                                    "cumshot_face", "titjob", "handjob"}
+                                _new_floor = 0
                                 if any(m in _intimate_moods for m in rel_moods):
                                     rel["intimate_scenes"] += 1
                                     rel["level"] = max(rel["level"], 4)
+                                    _new_floor = 4
                                 elif "sensual_tease" in rel_moods or "kiss" in rel_moods:
                                     rel["level"] = max(rel["level"], min(rel["level"] + 1, 3), 2)
+                                    _new_floor = 2
                                 else:
                                     rel["level"] = max(rel["level"], 1)
+                                    _new_floor = 1
                                 # Promote to lover after multiple intimate scenes
                                 if rel["intimate_scenes"] >= 3:
                                     rel["level"] = 5
+                                    _new_floor = 5
+                                # Lock the per-scene mood floor so trust drops can't
+                                # un-do a kiss / intimate scene that physically happened.
+                                from trust import record_scene_mood_floor as _rec_floor
+                                _rec_floor(rel, _new_floor)
 
                             # Fire image gen (non-blocking)
                             img_task = asyncio.create_task(
@@ -1264,7 +1290,25 @@ class StoryEngine:
                     _seq = session.sequence_number - 1
                     _choice = choice_text
                     _setting = session.setting
-                    _chars = session.cast.get("actors", [])
+                    # CRITICAL: only write per-character memory for chars who
+                    # ACTUALLY appeared in this sequence — otherwise every cast
+                    # member ends up "remembering" scenes they were never in
+                    # (cross-character leak: Léa remembers what happened with
+                    # Nesra at the bar even though she was at home all day).
+                    _chars_in_sequence: list[str] = []
+                    _seen_codes: set[str] = set()
+                    for _scene_codes in (scene_actors or {}).values():
+                        for _c in (_scene_codes or []):
+                            if _c and _c not in _seen_codes:
+                                _seen_codes.add(_c)
+                                _chars_in_sequence.append(_c)
+                    # Also include resolver-placed characters (sometimes the
+                    # narrator forgets to put them in actors_present even though
+                    # they were on screen).
+                    for _c in (present_characters or []):
+                        if _c and _c not in _seen_codes:
+                            _seen_codes.add(_c)
+                            _chars_in_sequence.append(_c)
 
                     log.log_mem0_store(len(all_narration), _choice)
 
@@ -1275,7 +1319,7 @@ class StoryEngine:
                             session_id=_sid, user_id=_uid,
                             sequence_number=_seq, narration_text=all_narration,
                             choice_made=_choice, setting_label=_setting,
-                            characters=_chars,
+                            characters=_chars_in_sequence,
                             setting_id=_setting_id,
                         )
 
@@ -1381,6 +1425,53 @@ class StoryEngine:
                               + (f" + {new_locs_added} new locations" if new_locs_added else ""))
                 except Exception as e:
                     print(f"[agent] whereabouts extract failed: {e}")
+
+            # ── Trust delta extraction (post-sequence, present chars only) ─
+            # Reads previous_choice + final narration and produces per-character
+            # trust deltas in [-3..+3]. Applied with temperament curves; level
+            # may shift up or down based on the new trust score (mood floor stays).
+            if session.world is not None and session.character_states and present_characters:
+                try:
+                    from agent import extract_trust_deltas as _extract_deltas
+                    from trust import apply_trust_delta as _apply
+                    full_narr = "\n\n".join(seg for seg in narration_segments if seg)
+                    deltas = await _extract_deltas(
+                        self.grok,
+                        previous_choice=choice_text or "",
+                        narration_text=full_narr,
+                        present_chars=present_characters,
+                        relationships=session.relationships,
+                        character_states=session.character_states,
+                        grok_model=model,
+                    )
+                    for d in deltas:
+                        code = d.get("char")
+                        if not code or code not in session.relationships:
+                            continue
+                        cs = session.character_states.get(code)
+                        temp = (getattr(cs, "temperament", "normal") if cs else "normal") or "normal"
+                        rel = session.relationships[code]
+                        result = _apply(rel, d["delta"], temp, reason=d.get("reason", ""))
+                        # Stash for debug + telemetry — show the recent N deltas in the world payload
+                        history = rel.setdefault("trust_history", [])
+                        history.append({
+                            "sequence": session.sequence_number,
+                            "raw_delta": result["raw_delta"],
+                            "applied_delta": result["applied_delta"],
+                            "new_trust": result["new_trust"],
+                            "new_level": result["new_level"],
+                            "level_change": result["level_change"],
+                            "reason": result["reason"],
+                        })
+                        # Cap history at last 20
+                        if len(history) > 20:
+                            rel["trust_history"] = history[-20:]
+                        arrow = "↑" if result["level_change"] > 0 else ("↓" if result["level_change"] < 0 else "·")
+                        print(f"[trust] {code} ({temp}): raw={d['delta']:+d} "
+                              f"applied={result['applied_delta']:+.1f} → trust={result['new_trust']} "
+                              f"L{rel['level']} {arrow}  ({result['reason'][:60]})")
+                except Exception as e:
+                    print(f"[trust] extract_trust_deltas failed: {e}")
 
             # Log narration + costs
             log.log_narration(narration_segments)

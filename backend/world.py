@@ -16,6 +16,10 @@ from dataclasses import dataclass, field, asdict
 
 # Time slots in order — used to compute next-slot transitions
 SLOTS: tuple[str, ...] = ("morning", "afternoon", "evening", "night")
+
+# Cap on per-character `recent_events` log. Keeps the prompt + persistence small
+# while giving the narrator enough context to reference recent off-screen life.
+MAX_RECENT_EVENTS: int = 7
 SLOT_LABELS_FR = {
     "morning": "matin",
     "afternoon": "après-midi",
@@ -199,12 +203,24 @@ class CharacterState:
     overrides: dict[str, str] = _field(default_factory=dict)  # "<day>_<slot>" → loc_id
     today_mood: str = ""                 # populated by daily tick
     intentions_toward_player: str = ""   # populated by daily tick
-    recent_event: str = ""               # 1-line "what happened to them today" — populated by daily tick
+    # Off-screen life log: list of {day, text} entries. Most-recent first or
+    # last? We append in chronological order (oldest first) and trim from the
+    # head when len > MAX_RECENT_EVENTS. Use `recent_event` (singular) as a
+    # convenience accessor for the latest entry — kept for back-compat with
+    # older serialized state and the prompt's `Hier (off-screen)` line.
+    recent_events: list[dict] = _field(default_factory=list)
     last_tick_day: int = 0               # last world.day the daily_tick ran for this char (avoid re-firing on same day)
     # How quickly this character opens up. Drives the narrative reaction cues
     # injected into the relationships block — does NOT change LoRA gating.
     # Valid values: "reserved" | "normal" | "wild". Defaults to "normal".
     temperament: str = "normal"
+
+    @property
+    def recent_event(self) -> str:
+        """Back-compat: return the most recent event's text (or empty string)."""
+        if not self.recent_events:
+            return ""
+        return str(self.recent_events[-1].get("text", "") or "")
 
     def as_dict(self) -> dict:
         return {
@@ -215,7 +231,7 @@ class CharacterState:
             "overrides": dict(self.overrides),
             "today_mood": self.today_mood,
             "intentions_toward_player": self.intentions_toward_player,
-            "recent_event": self.recent_event,
+            "recent_events": list(self.recent_events),
             "last_tick_day": self.last_tick_day,
             "temperament": self.temperament,
         }
@@ -229,6 +245,19 @@ class CharacterState:
             _last_tick = int(data.get("last_tick_day", 0) or 0)
         except (TypeError, ValueError):
             _last_tick = 0
+        # Migration: older sessions stored a single `recent_event: str`. Promote
+        # it to a one-entry list so the new accessor works.
+        events_raw = data.get("recent_events")
+        events: list[dict] = []
+        if isinstance(events_raw, list):
+            for e in events_raw:
+                if isinstance(e, dict) and (e.get("text") or "").strip():
+                    try:
+                        events.append({"day": int(e.get("day", 0) or 0), "text": str(e["text"])[:240]})
+                    except (TypeError, ValueError):
+                        continue
+        elif "recent_event" in data and (data.get("recent_event") or "").strip():
+            events.append({"day": _last_tick, "text": str(data["recent_event"])[:240]})
         return cls(
             code=str(data.get("code", "")),
             personality=str(data.get("personality", "")),
@@ -237,7 +266,7 @@ class CharacterState:
             overrides=dict(data.get("overrides", {})),
             today_mood=str(data.get("today_mood", "")),
             intentions_toward_player=str(data.get("intentions_toward_player", "")),
-            recent_event=str(data.get("recent_event", "")),
+            recent_events=events,
             last_tick_day=_last_tick,
             temperament=_temp,
         )

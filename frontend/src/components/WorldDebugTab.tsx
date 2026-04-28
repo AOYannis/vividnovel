@@ -20,6 +20,7 @@ export default function WorldDebugTab() {
   const knownWhereabouts = useGameStore((s) => s.knownWhereabouts)
   const presenceNow = useGameStore((s) => s.presenceNow)
   const characterNames = useGameStore((s) => s.characterNames)
+  const relationships = useGameStore((s) => s.relationships)
   const setWorldPayload = useGameStore((s) => s.setWorldPayload)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -102,13 +103,53 @@ export default function WorldDebugTab() {
         charCodes.map((code) => {
           const cs = characterStates[code]
           const display = characterNames[code] || code
+          const rel = (relationships || {})[code]
+          const trust = rel?.trust ?? 0
+          const trustHistory = rel?.trust_history || []
+          const recentEvents = cs.recent_events || []
+          const tempColor = cs.temperament === 'wild' ? 'text-rose-300 bg-rose-950/40 border-rose-800/40'
+            : cs.temperament === 'reserved' ? 'text-cyan-300 bg-cyan-950/40 border-cyan-800/40'
+            : 'text-neutral-300 bg-neutral-800/60 border-neutral-700'
+          const levelLabel = ['STRANGER','ACQUAINTANCE','FLIRTING','CLOSE','INTIMATE','LOVER'][rel?.level ?? 0] || 'STRANGER'
           return (
             <div key={code} className="bg-neutral-900 rounded-lg p-3 border border-neutral-800 space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h4 className="text-xs font-medium text-emerald-400">
                   {display} <span className="text-neutral-600 font-mono">({code})</span>
                 </h4>
+                {cs.temperament && (
+                  <span className={`text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5 rounded border ${tempColor}`}>
+                    {cs.temperament}
+                  </span>
+                )}
               </div>
+
+              {/* Relationship snapshot — level + trust score */}
+              {rel && (
+                <div className="bg-neutral-950/60 border border-neutral-800/50 rounded px-2 py-1.5 text-[11px]">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-neutral-500">Niveau</span>
+                      <span className="font-mono text-amber-300">{rel.level}</span>
+                      <span className="text-neutral-600">·</span>
+                      <span className="text-neutral-300">{levelLabel}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-neutral-500">Trust</span>
+                      <span className={`font-mono ${trust > 0 ? 'text-emerald-300' : trust < 0 ? 'text-rose-300' : 'text-neutral-400'}`}>
+                        {trust > 0 ? '+' : ''}{Number(trust).toFixed(1)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-neutral-600 mt-0.5">
+                    {rel.scenes} scènes · {rel.intimate_scenes} intimes · last_mood=<span className="font-mono">{rel.last_mood}</span>
+                    {rel.scene_mood_floor_level !== undefined && rel.scene_mood_floor_level > 0 && (
+                      <> · floor=L{rel.scene_mood_floor_level}</>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1 text-[11px]">
                 {cs.personality && (
                   <div className="flex gap-2">
@@ -135,6 +176,42 @@ export default function WorldDebugTab() {
                   </div>
                 )}
               </div>
+
+              {/* Recent off-screen events */}
+              {recentEvents.length > 0 && (
+                <div className="mt-2">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Vie hors-scène ({recentEvents.length})</div>
+                  <ul className="text-[10px] text-neutral-300 space-y-0.5">
+                    {recentEvents.slice().reverse().map((e, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="text-neutral-600 font-mono shrink-0">J{e.day}</span>
+                        <span>{e.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Trust delta history (most recent first) */}
+              {trustHistory.length > 0 && (
+                <div className="mt-2">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Trust deltas ({trustHistory.length})</div>
+                  <ul className="text-[10px] space-y-0.5">
+                    {trustHistory.slice().reverse().slice(0, 8).map((h, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="text-neutral-600 font-mono shrink-0">seq{h.sequence}</span>
+                        <span className={`font-mono shrink-0 w-12 ${h.applied_delta > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          {h.applied_delta > 0 ? '+' : ''}{h.applied_delta.toFixed(1)}
+                        </span>
+                        {h.level_change !== 0 && (
+                          <span className="font-mono shrink-0 text-amber-300">L{h.level_change > 0 ? '↑' : '↓'}</span>
+                        )}
+                        <span className="text-neutral-400 italic">{h.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {/* Schedule grid */}
               <div className="mt-2">

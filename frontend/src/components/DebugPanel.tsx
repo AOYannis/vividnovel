@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useGameStore } from '../stores/gameStore'
 import {
   getSystemPrompt, updateSystemPrompt, resetSystemPrompt,
-  streamPromptModification, getSessionDebug, getSessionMemories,
+  streamPromptModification, getSessionDebug, getSessionMemories, getAllMem0,
+  type Mem0AllResponse,
   fetchAvailableLoras, getStyleLoras, updateStyleLoras, getExtraLoras, updateExtraLoras,
   getVideoSettings, updateVideoSettings,
   regenImage, rewriteImagePrompt,
@@ -22,6 +23,8 @@ export default function DebugPanel({ onClose }: DebugPanelProps) {
   const [tab, setTab] = useState<'prompts' | 'system' | 'memory' | 'loras' | 'video' | 'costs' | 'world'>('prompts')
   const [memoryData, setMemoryData] = useState<{ persistent_memory: string; narrative_memory: string; mem0_enabled: boolean } | null>(null)
   const [memoryLoading, setMemoryLoading] = useState(false)
+  const [mem0All, setMem0All] = useState<Mem0AllResponse | null>(null)
+  const [mem0AllLoading, setMem0AllLoading] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState('')
   const [isOverride, setIsOverride] = useState(false)
   const [modifyInstructions, setModifyInstructions] = useState('')
@@ -156,12 +159,21 @@ export default function DebugPanel({ onClose }: DebugPanelProps) {
             key={t}
             onClick={() => {
               setTab(t)
-              if (t === 'memory' && !memoryData && sessionId) {
-                setMemoryLoading(true)
-                getSessionMemories(sessionId)
-                  .then(setMemoryData)
-                  .catch(() => {})
-                  .finally(() => setMemoryLoading(false))
+              if (t === 'memory' && sessionId) {
+                if (!memoryData) {
+                  setMemoryLoading(true)
+                  getSessionMemories(sessionId)
+                    .then(setMemoryData)
+                    .catch(() => {})
+                    .finally(() => setMemoryLoading(false))
+                }
+                if (!mem0All) {
+                  setMem0AllLoading(true)
+                  getAllMem0(sessionId)
+                    .then(setMem0All)
+                    .catch(() => {})
+                    .finally(() => setMem0AllLoading(false))
+                }
               }
             }}
             className={`px-3 py-3 min-w-[56px] shrink-0 text-xs font-medium transition-colors ${
@@ -802,25 +814,108 @@ export default function DebugPanel({ onClose }: DebugPanelProps) {
               )}
             </div>
 
+            {/* Per-character mem0 — RAW dump per scope, lets you verify there's
+                no cross-character leak (Léa shouldn't have memories from a scene
+                she was never in). */}
+            <div className="bg-neutral-950 rounded-lg p-3 border border-neutral-800">
+              <h4 className="text-xs font-medium text-emerald-400/80 mb-2">
+                Mémoire par personnage (cross-session, scopée user+setting+char)
+              </h4>
+              {mem0AllLoading ? (
+                <div className="flex items-center gap-2 text-xs text-neutral-500 py-2">
+                  <div className="w-3 h-3 border border-neutral-700 border-t-emerald-500 rounded-full animate-spin" />
+                  Chargement...
+                </div>
+              ) : !mem0All?.scopes ? (
+                <p className="text-[10px] text-neutral-600 italic">Mem0 désactivé.</p>
+              ) : Object.keys(mem0All.scopes.per_character).length === 0 ? (
+                <p className="text-[10px] text-neutral-600 italic">Aucun personnage dans le casting.</p>
+              ) : (
+                <div className="space-y-2">
+                  {Object.entries(mem0All.scopes.per_character).map(([code, entry]) => (
+                    <div key={code} className="bg-neutral-900/60 border border-neutral-800/40 rounded p-2">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <h5 className="text-[11px] font-mono text-emerald-300">{code}</h5>
+                        <span className="text-[9px] text-neutral-600 font-mono">
+                          {entry.memories.length} fact{entry.memories.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-neutral-700 font-mono mb-1 break-all">scope_id: {entry.scope_id}</div>
+                      {entry.memories.length === 0 ? (
+                        <p className="text-[10px] text-neutral-600 italic">Aucun souvenir stocké pour ce personnage.</p>
+                      ) : (
+                        <ul className="space-y-1 text-[10px] text-neutral-300 max-h-48 overflow-y-auto">
+                          {entry.memories.map((m, i) => (
+                            <li key={m.id || i} className="border-l-2 border-emerald-900/40 pl-2 leading-relaxed">
+                              <span>{m.memory}</span>
+                              {m.created_at && (
+                                <div className="text-[9px] text-neutral-600 mt-0.5 font-mono">{new Date(m.created_at).toLocaleString()}</div>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Raw session-narrative memories (for cross-checking the formatted block) */}
+            {mem0All?.scopes?.session_narrative && (
+              <details className="bg-neutral-950 rounded-lg border border-neutral-800">
+                <summary className="text-xs font-medium text-indigo-400/80 px-3 py-2 cursor-pointer">
+                  Session narrative — raw ({mem0All.scopes.session_narrative.memories.length} entrées)
+                </summary>
+                <div className="px-3 pb-3 text-[10px] text-neutral-400 font-mono whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+                  {mem0All.scopes.session_narrative.memories.map((m, i) => (
+                    <div key={m.id || i} className="border-l-2 border-indigo-900/40 pl-2 mb-1">
+                      {m.memory}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {/* Raw persistent memories */}
+            {mem0All?.scopes?.persistent && (
+              <details className="bg-neutral-950 rounded-lg border border-neutral-800">
+                <summary className="text-xs font-medium text-amber-400/80 px-3 py-2 cursor-pointer">
+                  Persistant (cross-session) — raw ({mem0All.scopes.persistent.memories.length} entrées)
+                </summary>
+                <div className="px-3 pb-3 text-[10px] text-neutral-400 font-mono whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+                  {mem0All.scopes.persistent.memories.map((m, i) => (
+                    <div key={m.id || i} className="border-l-2 border-amber-900/40 pl-2 mb-1">
+                      {m.memory}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
             {/* Refresh button */}
             <button
               onClick={() => {
                 if (!sessionId) return
                 setMemoryLoading(true)
-                getSessionMemories(sessionId)
-                  .then(setMemoryData)
-                  .catch(() => {})
-                  .finally(() => setMemoryLoading(false))
+                setMem0AllLoading(true)
+                Promise.all([
+                  getSessionMemories(sessionId).then(setMemoryData).catch(() => {}),
+                  getAllMem0(sessionId).then(setMem0All).catch(() => {}),
+                ]).finally(() => {
+                  setMemoryLoading(false)
+                  setMem0AllLoading(false)
+                })
               }}
-              disabled={memoryLoading || !sessionId}
+              disabled={memoryLoading || mem0AllLoading || !sessionId}
               className="w-full text-xs bg-neutral-800 hover:bg-neutral-700 disabled:opacity-30 py-2 rounded-lg text-neutral-400 transition-colors"
             >
-              {memoryLoading ? 'Chargement...' : 'Rafraichir depuis Mem0'}
+              {(memoryLoading || mem0AllLoading) ? 'Chargement...' : 'Rafraîchir depuis Mem0'}
             </button>
 
             {/* Mem0 status */}
             <div className="text-[9px] text-neutral-600 text-center">
-              Mem0: {memoryData?.mem0_enabled !== false ? 'active' : 'desactive'}
+              Mem0: {memoryData?.mem0_enabled !== false ? 'active' : 'désactivé'}
             </div>
           </div>
         )}

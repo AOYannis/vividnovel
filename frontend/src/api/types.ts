@@ -42,12 +42,25 @@ export type SSEEvent =
   | { type: 'scene_audio_error'; index: number; error: string }
   | { type: 'error'; message: string }
 
+export interface TrustHistoryEntry {
+  sequence: number
+  raw_delta: number
+  applied_delta: number
+  new_trust: number
+  new_level: number
+  level_change: number
+  reason: string
+}
+
 export interface RelationshipData {
   level: number       // 0=stranger, 1=acquaintance, 2=flirting, 3=close, 4=intimate, 5=lover
   encounters: number  // number of sequences with this character
   scenes: number      // total scenes featuring this character
   intimate_scenes: number
   last_mood: string
+  trust?: number                              // continuous trust score (can be negative)
+  scene_mood_floor_level?: number             // mood-based floor: level can't drop below this
+  trust_history?: TrustHistoryEntry[]         // recent deltas with reasons (capped at 20)
 }
 
 export interface Choice {
@@ -140,6 +153,11 @@ export interface WorldState {
   history: WorldHistoryEntry[]
 }
 
+export interface RecentEvent {
+  day: number
+  text: string
+}
+
 export interface CharacterState {
   code: string
   personality: string
@@ -148,6 +166,9 @@ export interface CharacterState {
   overrides: Record<string, string>    // '<day>_<slot>' → loc_id (rendez-vous)
   today_mood: string
   intentions_toward_player: string
+  temperament?: 'reserved' | 'normal' | 'wild'
+  recent_events?: RecentEvent[]
+  last_tick_day?: number
 }
 
 export interface KnownWhereabout {
@@ -173,6 +194,7 @@ export interface WorldPayload {
   known_whereabouts?: KnownWhereabout[]
   presence_now?: Record<string, string[]>   // loc_id → [char_codes]
   upcoming_rendezvous?: UpcomingRendezvous[]
+  relationships?: Record<string, RelationshipData>
 }
 
 // ─── Story Sequence ──────────────────────────────────────────────────────────
