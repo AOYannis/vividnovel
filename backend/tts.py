@@ -38,36 +38,45 @@ WRAPPING TAGS — MUST wrap text with both opening and closing tag, like XML:
 1. Wrapping tags MUST be written as `<tag>text</tag>`. NEVER as `[soft]`, `[whisper]`, etc.
 2. Every `<tag>` you open MUST have a matching `</tag>`.
 3. Never nest the same tag inside itself.
-4. NEVER use markdown, stage directions, or character names.
+4. **NEVER STACK / NEST DIFFERENT WRAPPING TAGS around the same text.** xAI TTS
+   does not handle nested wrapping tags reliably — the inner tag name gets
+   spoken aloud as a literal word ("slow", "soft", "lower-pitch"). Pick the
+   ONE most-impactful tag for each clause. Never write
+   `<soft><slow>text</slow></soft>` — pick `<soft>text</soft>` or
+   `<slow>text</slow>` alone.
+5. NEVER use markdown, stage directions, or character names.
 
 ═══ EXPRESSION PALETTE — SENSUAL ROMANCE / NSFW FOCUS ═══
 Treat tags like a lover’s touch: the right amount feels heavenly; too much feels forced.
+Pick ONE wrapping tag per sentence/clause — never stack them.
 
 NARRATOR PROSE (context narration for romance/NSFW stories):
   • Default tone: warm, velvety, intimate, and seductive — like a lover whispering the story directly into the listener’s ear.
-  • Use <slow> + <soft> on almost every sentence for a luxurious, lingering feel.
-  • Use <lower-pitch> generously to create a deep, husky, sensual timbre.
-  • For intimate or erotic moments: wrap in <soft><slow><lower-pitch>...</lower-pitch></slow></soft>
+  • Use ONE of <slow>, <soft>, or <lower-pitch> per sentence — the one that fits
+    best. Vary across sentences; never stack two of them on the same clause.
+  • For intimate or erotic moments: prefer <whisper>...</whisper> alone, OR
+    <soft>...</soft> alone. Pick ONE.
   • Breath sounds are allowed but SPARINGLY and only at natural emotional peaks:
     → [inhale] or [breath] when tension builds
     → [exhale] or [sigh] after a particularly charged moment
     → NEVER put [breath], [exhale], or [sigh] at the end of every sentence.
-    - NEVER use "lower pitch" but rather use <lower-pitch>
+    - NEVER use "lower pitch" as words — use the tag <lower-pitch>...</lower-pitch>.
   • Use <whisper> only for the most confidential or highly erotic inner thoughts.
   • Use [pause] or [long-pause] for delicious tension between actions.
 
 DIALOGUES (text inside quotes):
   • Much richer expression allowed — make it feel alive and aroused.
-  • Intimate/sexy line → <whisper> or <soft><lower-pitch>
-  • Passionate line → <build-intensity> or <emphasis> on key words
-  • Teasing/playful → <sing-song> or [chuckle]
+  • Intimate/sexy line → <whisper>...</whisper> alone (don't combine with anything).
+  • Passionate line → <build-intensity>...</build-intensity> OR <emphasis>...</emphasis>
+  • Teasing/playful → <sing-song>...</sing-song> or [chuckle]
   • One [breath]/[sigh] per line max, placed naturally.
 
 ═══ ANTI-PATTERNS — DO NOT DO THESE ═══
-  • Adding [breath] or [exhale] at the end of every narration sentence (sounds ridiculous and unnatural)
-  • Over-tagging every single sentence with breath sounds
-  • Using <slow> on single words instead of whole clauses
-  • Putting breathing tags in every prose sentence
+  • STACKING wrapping tags ("<soft><slow>...</slow></soft>") — the inner tag is spoken aloud.
+  • Adding [breath] or [exhale] at the end of every narration sentence.
+  • Over-tagging every single sentence with breath sounds.
+  • Using <slow> on single words instead of whole clauses.
+  • Putting breathing tags in every prose sentence.
 """
 
 
@@ -265,9 +274,13 @@ def _sanitize_tts_tags(text: str) -> str:
                     out.append(f"</{stack.pop()}>")
             # else: orphan closing — drop silently
         else:
-            # Opening tag
-            if name in stack:
-                # Already open — drop the duplicate open (no nesting same tag)
+            # Opening tag — flatten: at most ONE wrapping tag at a time.
+            # xAI TTS does not handle nested wrapping tags reliably (it speaks the
+            # inner tag name aloud as a literal word), so when ANY tag is already
+            # on the stack we drop this new opening (and its eventual closer will
+            # be silently ignored as an "orphan").
+            if stack:
+                # Already inside a wrapping tag — drop this nested open
                 pass
             else:
                 stack.append(name)
@@ -292,12 +305,16 @@ _MODE_BRIEFS = {
         "- Style: warm, velvety, luxurious, and deeply intimate — like a lover telling the story in a candlelit bedroom.\n"
         "- Delivery must feel slow, soft, and husky throughout the entire narration.\n"
         "- Use gentle pauses for tension and very subtle breath sounds only at natural emotional peaks.\n"
-        "- Keep everything elegant and seductive — never robotic or overdone."
+        "- Keep everything elegant and seductive — never robotic or overdone.\n"
+        "- ⚠️ Pick ONLY ONE wrapping tag per sentence (one of <slow>, <soft>, "
+        "<lower-pitch>, <whisper>). NEVER stack two of them around the same text — "
+        "xAI TTS reads the inner tag name aloud as a literal word."
     ),
     "dialogue": (
         "MODE = DIALOGUE (a character speaking out loud, in scene).\n"
         "- Make the delivery match the emotion: seductive, aroused, teasing, or passionate.\n"
-        "- Allow natural breath and intensity changes that feel real and erotic."
+        "- Allow natural breath and intensity changes that feel real and erotic.\n"
+        "- ⚠️ Pick ONLY ONE wrapping tag per line. NEVER stack two."
     ),
 }
 

@@ -44,6 +44,7 @@ export default function SetupPage() {
   const [voiceNarration, setVoiceNarration] = useState(true)
   const [voiceToVideo, setVoiceToVideo] = useState(true)
   const [voiceId, setVoiceId] = useState('ara')
+  const [narrationVoice, setNarrationVoice] = useState('sal')
   // null means "follow game language"; user can override to a specific BCP-47 code
   const [voiceLanguage, setVoiceLanguage] = useState<string | null>(null)
   const [voiceEnhance, setVoiceEnhance] = useState(true)
@@ -313,6 +314,7 @@ export default function SetupPage() {
         voice_narration: voiceNarration || undefined,
         voice_to_video: voiceToVideo || undefined,
         voice_id: voiceNarration ? voiceId : undefined,
+        narration_voice: voiceNarration ? narrationVoice : undefined,
         // Send only when user explicitly overrode; otherwise backend falls back to the game language
         voice_language: voiceNarration && voiceLanguage ? voiceLanguage : undefined,
         voice_enhance: voiceNarration ? voiceEnhance : undefined,
@@ -1269,7 +1271,19 @@ export default function SetupPage() {
                   <>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[10px] text-neutral-500 uppercase tracking-wider">Voice</label>
+                        <label className="text-[10px] text-neutral-500 uppercase tracking-wider">Narrator voice</label>
+                        <select value={narrationVoice} onChange={(e) => setNarrationVoice(e.target.value)}
+                          className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:border-amber-600 focus:outline-none">
+                          <option value="sal">Sal (neutral)</option>
+                          <option value="ara">Ara (smooth female)</option>
+                          <option value="eve">Eve (warm female)</option>
+                          <option value="leo">Leo (warm male)</option>
+                          <option value="rex">Rex (deep male)</option>
+                        </select>
+                        <div className="text-[9px] text-neutral-600 mt-0.5">For narration prose (not dialogue)</div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-neutral-500 uppercase tracking-wider">Dialogue fallback</label>
                         <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}
                           className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:border-amber-600 focus:outline-none">
                           <option value="ara">Ara (smooth female)</option>
@@ -1278,7 +1292,10 @@ export default function SetupPage() {
                           <option value="rex">Rex (deep male)</option>
                           <option value="sal">Sal (neutral)</option>
                         </select>
+                        <div className="text-[9px] text-neutral-600 mt-0.5">Used when no cast actor is speaking</div>
                       </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2">
                       <div>
                         <label className="text-[10px] text-neutral-500 uppercase tracking-wider">Language</label>
                         <select
