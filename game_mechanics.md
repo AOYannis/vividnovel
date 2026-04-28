@@ -449,7 +449,7 @@ Loose backlog of features we scoped or proposed during development but deferred.
 - **Drop the mood gate entirely** — once the reaction-cue + temperament narrative drivers prove themselves, the Python mood gate becomes pure dead weight. Currently kept as a soft fallback for absurd jumps (missionary at level 0 stranger). ~30min cleanup if ever.
 - **Tighten POV sanitiser if drift continues** — current patterns catch back-shots and (when no actor) face close-ups. Could extend to "wide shot of the protagonist", "point of view of X looking at Y", etc. Add patterns as we observe them.
 
-### Phone / messaging
+### Phone / messaging DONE
 - **In-phone rendez-vous creation** — let the player propose an RDV directly through the phone chat (not just emerging from a scene). Detect `meet me at X tomorrow night` in player's typed phone message and add to known_whereabouts. ~1.5h.
 - **Phone notifications for imminent RDVs** — small badge on the phone icon when an RDV is `now` or `next`, with a one-line reminder.
 
@@ -461,3 +461,7 @@ Loose backlog of features we scoped or proposed during development but deferred.
 - **HTTPS dev server option** — add `@vitejs/plugin-basic-ssl` + a `dev:lan-https` npm script for the day we hit an HTTPS-only browser feature (clipboard, mic, getUserMedia). Not blocking right now.
 - **Per-mechanic test coverage** — `mood_gate`, `presence_gate`, `world` rdv helpers, `tts.parse_speech_segments` are all pure functions and trivial to unit-test. Currently only covered by manual smoke runs.
 - **Telemetry on mood downgrades & POV sanitisations** — count how often each guardrail fires per session; if a class of fix is rarely needed, retire it. If it fires constantly, the prompt needs tightening.
+
+### other things in mind :
+- hide the text bubles / narration, dialogues, etc. or bring back with a small "chat" icon
+- 

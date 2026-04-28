@@ -274,25 +274,36 @@ TEMPERAMENT — pick ONE per character (drives how quickly they open up to the p
 - `wild`: open, flirty, escalates quickly when interest is mutual. ~10-20% of cast.
 Pick a MIX across the cast — never make all characters the same temperament.
 
-LOCATIONS — exactly 6 locations, with these CONSTRAINTS:
-- INCLUDE one location with id "home" and type "home" — this is the PLAYER's home.
-  Theme its name to the setting (e.g. pirate game: "Ta cabine au-dessus du quai"; futurist: "Ta capsule, niveau 47").
-- INCLUDE one location with id "work" and type "work" — the player's workspace.
-- The other 4 locations should fit the setting and cover varied types: at least one social
-  spot (bar/cafe/club), one outdoor/relaxation (park/etc.), one for activity/encounter
-  (gym/club/salon/...), one wildcard appropriate to the setting.
-- All `id` values must be lowercase, snake_case, ASCII, no spaces (e.g. "tavern_anchor", "old_docks").
+LOCATIONS — exactly 6 locations, designed for THIS SPECIFIC SETTING:
+- INCLUDE one location with id "home" and type "home" — this is the PLAYER's
+  private space (a flat, a guest room, a cabin, a pod, a tent — whatever the
+  setting calls for). It is where the player starts and where they retreat.
+- The other 5 are entirely yours to invent based on the setting's context.
+  They can be rooms in the same building, decks of a ship, cars of a train,
+  bars/cafés/parks in a city, ruins in a wilderness, modules of a station —
+  whatever makes the setting feel ALIVE and supports natural encounters,
+  conversations, and conflict between the cast and the player.
+- DO NOT default to a generic urban-modern stack (bar + café + gym + park + club)
+  unless the setting genuinely calls for it. A manor whodunnit, a yacht cruise,
+  a polar expedition, an astronomical observatory all need very different sets.
+- The `type` field is a loose hint for the map ICON only — pick the closest
+  match from {{home, cafe, bar, club, gym, park, work, salon, other}}, or
+  "other" if nothing fits. The type does NOT constrain what the place actually is.
+- All `id` values must be lowercase, snake_case, ASCII, no spaces
+  (e.g. "library_west_wing", "deck_aft", "noodle_bar", "old_docks").
 
 SCHEDULES — for each character codename in {cast_codes_str}:
-- "home" is FORBIDDEN as that character's location at any slot. Cast members live elsewhere
-  off-screen, NOT at the player's home. (Use "free" if you don't want to specify.)
+- "home" is FORBIDDEN as that character's location at any slot — that's the
+  player's private space, off-limits to the cast. (Use "free" if unsure.)
 - At most ONE cast member may single-pin (no pipe) the same location at the SAME
   evening slot ("weekday_evening" or "weekend_evening"). If two would clash, change one
   to "free" or to a multi-candidate ("a|b").
 - Use "free" 3-5 slots per character per week. Predictability kills the magic.
-- Job slots: pinned (single id, usually their work location).
-- Make schedules COHESIVE with each character's persona/job (yoga teacher uses gym,
-  writer the cafe, bartender the bar at night, etc.).
+- Anchor each character to the location that fits their role/job/habit in this
+  setting (a chef = the kitchen; a captain = the bridge; a librarian = the
+  library; a bartender = the bar). Pinned single id at the slot when they
+  WOULD be there.
+- Make schedules COHESIVE with each character's persona and the setting.
 - Make schedules DIFFERENT across the cast — each character has a distinct rhythm.
 
 Output only the JSON, no commentary."""
