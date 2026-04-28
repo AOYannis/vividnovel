@@ -1,4 +1,4 @@
-import type { SSEEvent, Actor, Setting, LoraInfo, ExtraLora, GrokModel } from './types'
+import type { SSEEvent, Actor, Setting, LoraInfo, ExtraLora, GrokModel, KnownWhereabout } from './types'
 import { useAuthStore } from '../stores/authStore'
 
 // In dev (Vite): empty → /api proxied to localhost:8001
@@ -146,13 +146,18 @@ export async function startGame(params: {
 
 // ─── Phone Chat ─────────────────────────────────────────────────────────────
 
+export interface PhoneChatHandlers {
+  onMessageDelta: (text: string) => void
+  onMessageDone: (text: string, character: string) => void
+  onSelfieGenerating: () => void
+  onSelfieReady: (url: string, cost: number) => void
+  onRendezvousAdded?: (rdv: KnownWhereabout) => void
+  onError: (error: string) => void
+}
+
 export async function streamPhoneChat(
   params: { sessionId: string; characterCode: string; message: string },
-  onMessageDelta: (text: string) => void,
-  onMessageDone: (text: string, character: string) => void,
-  onSelfieGenerating: () => void,
-  onSelfieReady: (url: string, cost: number) => void,
-  onError: (error: string) => void,
+  handlers: PhoneChatHandlers,
 ): Promise<void> {
   const res = await apiFetch('/api/game/phone-chat', {
     method: 'POST',
@@ -162,7 +167,7 @@ export async function streamPhoneChat(
       message: params.message,
     }),
   })
-  if (!res.ok || !res.body) { onError('Phone chat failed'); return }
+  if (!res.ok || !res.body) { handlers.onError('Phone chat failed'); return }
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -176,11 +181,12 @@ export async function streamPhoneChat(
       if (!line.startsWith('data: ')) continue
       try {
         const data = JSON.parse(line.slice(6))
-        if (data.type === 'message_delta') onMessageDelta(data.content)
-        else if (data.type === 'message_done') onMessageDone(data.text, data.character)
-        else if (data.type === 'selfie_generating') onSelfieGenerating()
-        else if (data.type === 'selfie_ready') onSelfieReady(data.url, data.cost)
-        else if (data.type === 'error') onError(data.message)
+        if (data.type === 'message_delta') handlers.onMessageDelta(data.content)
+        else if (data.type === 'message_done') handlers.onMessageDone(data.text, data.character)
+        else if (data.type === 'selfie_generating') handlers.onSelfieGenerating()
+        else if (data.type === 'selfie_ready') handlers.onSelfieReady(data.url, data.cost)
+        else if (data.type === 'rendezvous_added') handlers.onRendezvousAdded?.(data.rendezvous)
+        else if (data.type === 'error') handlers.onError(data.message)
       } catch { /* skip */ }
     }
   }

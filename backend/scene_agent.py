@@ -416,6 +416,69 @@ async def extract_appearance(
         return ""
 
 
+async def extract_clothing(
+    grok_client,
+    *,
+    codename: str,
+    image_prompt: str,
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+) -> str:
+    """Pull a DENSE, REUSABLE clothing description for one character out of an
+    already-crafted image prompt. Used to lock the outfit on first sighting AND
+    after a confirmed clothing change, so future scenes can re-inject the rich
+    description verbatim and Z-Image renders the same garments each time.
+
+    The returned phrase is the source of truth for `consistency.clothing[code]`.
+    It must be specific enough that Z-Image Turbo cannot reasonably re-interpret
+    it across renders ("revealing pirate silks" → bad; "off-shoulder crimson
+    silk corset with gold-thread embroidery, brown leather belt with brass
+    buckle, asymmetric knee-length skirt slit on the right thigh, knee-high tan
+    boots" → good).
+
+    Returns a short, comma-separated phrase (~30-80 words) or empty string on
+    failure. Cost: ~80 input + ~80 output tokens per call (~$0.00005 each on
+    Grok 4.1 Fast). Fires once per actor on first sighting, plus once whenever
+    the LLM clothing-change classifier flags an actor as having changed.
+    """
+    if not image_prompt or not codename:
+        return ""
+    sys_msg = (
+        "You extract the CLOTHING of ONE specific character from a Z-Image "
+        "Turbo prompt. Output a single dense, comma-separated phrase that can "
+        "be reused VERBATIM in future prompts to lock the outfit so the image "
+        "model renders the SAME garments every time. INCLUDE for each visible "
+        "garment: cut/silhouette, colour, fabric/material, accessories (belts, "
+        "jewellery, footwear), and visible state (open, torn, ruffled, soaked, "
+        "etc.) — be SPECIFIC enough that no creative latitude is left. EXCLUDE: "
+        "head/face/hair, skin, body shape, pose, action, location, lighting, "
+        "camera, mood, anything else. If the prompt does not clearly describe "
+        "an outfit for this character, output an empty string. Output ONLY "
+        "the phrase — no labels, no quotes, no commentary."
+    )
+    user_msg = (
+        f"Character codename: `{codename}`\n\n"
+        f"Image prompt to extract clothing from:\n{image_prompt}\n\n"
+        f"Output the dense clothing phrase:"
+    )
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=grok_model,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.2,
+            max_tokens=200,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if text.startswith(("'", '"')) and text.endswith(("'", '"')) and len(text) > 2:
+            text = text[1:-1].strip()
+        return text
+    except Exception as e:
+        print(f"[scene_agent] extract_clothing({codename}) failed: {e}")
+        return ""
+
+
 def _fallback_prompt(
     scene_summary: str,
     shot_intent: str,

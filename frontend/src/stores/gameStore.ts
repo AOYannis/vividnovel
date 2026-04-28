@@ -53,7 +53,7 @@ interface GameState {
   // ── Phone (character messaging) ──
   phoneOpen: boolean
   phoneActiveChar: string | null  // which character's thread is open
-  phoneChats: Record<string, { role: 'user' | 'character'; text: string; imageUrl?: string }[]>
+  phoneChats: Record<string, { role: 'user' | 'character' | 'system'; text: string; imageUrl?: string; rendezvous?: import('../api/types').KnownWhereabout }[]>
   metCharacters: string[]  // character codenames the player has met
   characterNames: Record<string, string>  // codename → story name (set by Grok)
 

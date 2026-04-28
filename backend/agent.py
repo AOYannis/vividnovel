@@ -691,6 +691,222 @@ NO commentary."""
     return out
 
 
+# ─── Clothing change classifier ──────────────────────────────────────────
+
+async def detect_clothing_changes(
+    grok_client,
+    *,
+    scene_summary: str,
+    actors_present: list[str],
+    locked_clothing: dict[str, str],
+    language: str = "fr",
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+) -> set[str]:
+    """Read a scene summary and decide which present actors actually changed
+    their outfit IN THIS SCENE. Returns the set of codenames whose clothing
+    was deliberately altered (took off, put on, undressed, naked reveal, …).
+
+    Replaces brittle keyword matching that only worked for a fixed phrase list.
+    Calls Grok 4.1 Fast with a tiny focused prompt — language-agnostic, robust
+    to literary phrasing ("elle laissa glisser sa robe à terre", "her dress
+    pooled around her ankles", etc.).
+
+    Cost: ~80 input + ~30 output tokens per call (~$0.00002 each). Returns
+    empty set when no actors are present or summary is empty.
+    """
+    if not actors_present or not (scene_summary or "").strip():
+        return set()
+
+    locked_lines: list[str] = []
+    for code in actors_present:
+        locked = locked_clothing.get(code, "")
+        if locked:
+            locked_lines.append(f"- `{code}`: currently wearing « {locked[:120]} »")
+        else:
+            locked_lines.append(f"- `{code}`: no locked outfit yet (first scene with them)")
+    locked_block = "\n".join(locked_lines)
+
+    sys_msg = (
+        "You read a single scene description and decide whether each named character "
+        "deliberately CHANGED their outfit during the scene. Output strict JSON. "
+        "A change means: removing, adding, swapping, opening, tearing, or revealing "
+        "clothing in a way the narrator clearly describes — including subtle literary "
+        "phrasings ('her dress pooled around her ankles', 'la robe glissa au sol'). "
+        "It is NOT a change if the narrator merely paraphrases the same outfit, "
+        "describes movement, posture, atmosphere, or unrelated body details. "
+        "Be conservative: if uncertain, return false."
+    )
+    user_msg = f"""Scene description (in {language}):
+{scene_summary[:1000]}
+
+Characters present + their CURRENTLY LOCKED outfit:
+{locked_block}
+
+For each character, return whether their outfit changed DURING THIS SCENE.
+
+Output strict JSON:
+{{
+  "changes": [
+    {{"char": "<codename>", "changed": <true|false>, "what": "<one short phrase, max 60 chars, only when changed=true>"}}
+  ]
+}}
+
+Include EVERY character listed above (even when changed=false). NO commentary."""
+
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=grok_model,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=200,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content or "{}"
+        data = json.loads(raw)
+    except Exception as e:
+        print(f"[agent] detect_clothing_changes failed: {e}")
+        return set()
+
+    out: set[str] = set()
+    valid = set(actors_present)
+    for c in (data.get("changes") or []):
+        if not isinstance(c, dict):
+            continue
+        code = str(c.get("char", "")).strip()
+        if code in valid and bool(c.get("changed", False)):
+            out.add(code)
+    return out
+
+
+# ─── Phone-chat rendez-vous extractor ────────────────────────────────────
+
+async def extract_phone_rendezvous(
+    grok_client,
+    *,
+    player_msg: str,
+    char_response: str,
+    char_code: str,
+    current_day: int,
+    current_slot: str,
+    locations: list[Location],
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+) -> list[dict]:
+    """Extract a rendez-vous from a single phone-chat exchange (one player
+    message + the character's response).
+
+    Returns the SAME shape as `extract_whereabouts` mentions:
+    `[{char, location_id, day, slot, source, is_rendezvous, new_location?}]`.
+    The `char` field is always `char_code` (the phone partner). `is_rendezvous`
+    is always `True` here — the only kind we surface from phone exchanges is
+    a mutual commitment to meet. May propose a `new_location` if a specific
+    named place isn't in the existing list.
+
+    Empty list if no clear meeting was agreed. Cost ~$0.00006 per exchange.
+    """
+    if not (player_msg or "").strip() or not (char_response or "").strip():
+        return []
+    if not char_code or not locations:
+        return []
+    loc_lines = "\n".join(f"- `{loc.id}`: {loc.name}" for loc in locations)
+
+    sys_msg = (
+        "You read a SHORT phone-chat exchange between the player and ONE character. "
+        "Your only job: detect whether they JUST agreed to meet — a real, mutual "
+        "rendez-vous with a SPECIFIC location AND a SPECIFIC time. Output strict "
+        "JSON. Conservative: vague invitations ('on se voit bientôt', 'someday'), "
+        "wishes, or one-sided proposals without acceptance do NOT qualify."
+    )
+
+    user_msg = f"""Current day: {current_day}, current slot: {current_slot}.
+Phone partner codename: `{char_code}`
+
+Available locations (use ONLY these IDs unless you propose a new one):
+{loc_lines}
+
+Player message: {player_msg.strip()[:500]}
+Character response: {char_response.strip()[:500]}
+
+Output JSON:
+{{
+  "rendezvous": null  OR  {{
+    "location_id": "<existing id, or the id you propose in `new_location`>",
+    "day": <integer day, e.g. {current_day} or {current_day + 1}>,
+    "slot": "<morning|afternoon|evening|night>",
+    "source": "<short verbatim quote (max 80 chars) showing the agreement>",
+    "new_location": null OR {{"id": "<lowercase_snake_case>", "name": "<themed display name>", "type": "<home|cafe|bar|club|gym|park|work|salon|other>", "description": "<one short sentence>"}}
+  }}
+}}
+
+Rules:
+- ONLY emit when both messages clearly point to a meeting (e.g. player asks "café demain à 14h ?" and character says "ouais avec plaisir").
+- Convert relative times ("demain", "ce soir") to absolute day+slot.
+- "Ce soir" / "tonight" → day {current_day} slot evening (only when current slot is morning/afternoon).
+- If you can't pin down BOTH a location AND a day+slot AND mutual consent → set `rendezvous: null`.
+- `new_location` ONLY when a SPECIFIC named place is mentioned that isn't in the list above. Never for vague mentions like "un café".
+- NO commentary."""
+
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=grok_model,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.2,
+            max_tokens=300,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content or "{}"
+        data = json.loads(raw)
+    except Exception as e:
+        print(f"[agent] extract_phone_rendezvous failed: {e}")
+        return []
+
+    rdv = data.get("rendezvous")
+    if not isinstance(rdv, dict):
+        return []
+
+    valid_locs = {loc.id for loc in locations}
+    loc_id = str(rdv.get("location_id", "")).strip()
+    slot = str(rdv.get("slot", "")).strip().lower()
+    source = str(rdv.get("source", "")).strip()[:120]
+    try:
+        day = int(rdv.get("day", 0))
+    except (TypeError, ValueError):
+        return []
+    if slot not in SLOT_NAMES:
+        return []
+    if day < current_day:
+        return []
+
+    new_loc_payload = rdv.get("new_location") if isinstance(rdv.get("new_location"), dict) else None
+    entry: dict = {
+        "char": char_code,
+        "location_id": loc_id,
+        "day": day,
+        "slot": slot,
+        "source": source,
+        "is_rendezvous": True,
+    }
+    if loc_id not in valid_locs:
+        if not new_loc_payload:
+            return []  # location must be valid OR a proposed new one
+        new_id = str(new_loc_payload.get("id", "")).strip().lower()
+        new_id = "".join(c if (c.isalnum() or c == "_") else "_" for c in new_id)
+        if not new_id or not new_id[0].isalpha() or new_id != loc_id or new_id in valid_locs:
+            return []
+        entry["new_location"] = {
+            "id": new_id,
+            "name": str(new_loc_payload.get("name", new_id))[:80],
+            "type": str(new_loc_payload.get("type", "other")).lower()[:20],
+            "description": str(new_loc_payload.get("description", ""))[:200],
+        }
+    return [entry]
+
+
 # ─── Daily tick (Phase 5) ─────────────────────────────────────────────────
 
 async def daily_tick(

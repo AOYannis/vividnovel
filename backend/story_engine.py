@@ -30,7 +30,7 @@ from memory import (
 )
 from logger import SequenceLogger
 from davinci import DAVINCI_ENABLED, DAVINCI_TIMEOUT, generate_scene_video as davinci_generate, build_davinci_prompt
-from scene_agent import craft_image_prompt, extract_appearance
+from scene_agent import craft_image_prompt, extract_appearance, extract_clothing
 from mood_gate import gate_mood, infer_mood_from_summary
 from presence_gate import gate_presence
 
@@ -101,17 +101,17 @@ class ConsistencyTracker:
         loc = args.get("location_description", "")
         if loc:
             self.location = loc
+        # Clothing comes from `args["clothing_state"]` AFTER the engine has
+        # already filtered it (only LLM-confirmed changes pass through). The
+        # engine also writes the rich `extract_clothing` output back into the
+        # args for first-sighting + change scenes, so this is the source of truth.
+        # (We removed the regex-based fallback that used to fish "wearing X"
+        # out of the image prompt — the LLM extractor is far more reliable.)
         for actor, clothing in args.get("clothing_state", {}).items():
             self.clothing[actor] = clothing
         prompt = args.get("image_prompt", "")
         if prompt:
             self.previous_prompts.append(prompt)
-            # Auto-extract clothing from prompt if agent didn't fill clothing_state
-            # This prevents costume changes between sequences when the agent forgets
-            actors = args.get("actors_present", [])
-            explicit_clothing = args.get("clothing_state", {})
-            if actors and not explicit_clothing:
-                self._extract_clothing_from_prompt(prompt, actors)
         # Track secondary characters for cross-scene consistency
         for code, desc in args.get("secondary_characters", {}).items():
             if desc:
@@ -125,19 +125,6 @@ class ConsistencyTracker:
             display_name = display_name.strip()
             if display_name and display_name not in self.character_actors:
                 self.character_actors[display_name] = code
-
-    def _extract_clothing_from_prompt(self, prompt: str, actors: list[str]):
-        """Best-effort extraction of clothing descriptions from image prompts."""
-        import re
-        # Match "wearing ..." up to the next clause boundary (action, body part, camera term)
-        match = re.search(
-            r'wearing\s+(.+?)(?:\.\s|,\s*(?:she|he|her |his |one hand|both hands|eyes|gaze|looking|leaning|standing|sitting|holding|hands|pressed|seen |from |POV|shot on|highly|crisp|in a |at a |on a ))',
-            prompt, re.IGNORECASE
-        )
-        if match:
-            clothing_desc = match.group(1).strip().rstrip(',.')
-            if actors and clothing_desc and len(clothing_desc) > 5:
-                self.clothing[actors[0]] = clothing_desc
 
     def record_prompt_override(self, image_index: int, new_prompt: str):
         """Record a user-edited prompt to inform future consistency."""
@@ -825,13 +812,61 @@ class StoryEngine:
                             )
 
                             # Clothing: merge consistency tracker (locked outfits from
-                            # earlier scenes) with this scene's args (narrator may have
-                            # declared a change). args wins per-actor — so a deliberate
-                            # outfit change overrides the lock.
+                            # earlier scenes) with this scene's args. args ONLY wins when
+                            # the LLM classifier says the scene actually describes a
+                            # clothing change for that actor — otherwise the narrator's
+                            # `clothing_state` is treated as a paraphrase of the lock and
+                            # discarded. Replaces a brittle keyword list with a tiny
+                            # language-agnostic Grok call (~$0.00002 per scene with present
+                            # cast). Stops slow drift ("revealing pirate silks brushing close"
+                            # → "in vibrant crimson and gold fabrics" → "in flowing crimson…")
+                            # for scenes that don't actually change the outfit.
                             merged_clothing: dict[str, str] = dict(session.consistency.clothing or {})
-                            for _ac, _cl in (args.get("clothing_state") or {}).items():
-                                if _cl:
-                                    merged_clothing[_ac] = _cl
+
+                            # Decide which actors actually changed clothes in this scene.
+                            # Skip the LLM call entirely when there's nothing to gate (no
+                            # cast in scene OR no clothing args coming in).
+                            _args_clothing = args.get("clothing_state") or {}
+                            _changed_actors: set[str] = set()
+                            if _args_clothing and actors_present:
+                                try:
+                                    from agent import detect_clothing_changes as _detect_changes
+                                    _changed_actors = await _detect_changes(
+                                        self.grok,
+                                        scene_summary=scene_summary,
+                                        actors_present=actors_present,
+                                        locked_clothing=merged_clothing,
+                                        language=session.language or "fr",
+                                        grok_model=session.grok_model,
+                                    )
+                                    if _changed_actors:
+                                        print(f"[clothing] scene {image_index}: detected change for "
+                                              f"{sorted(_changed_actors)}")
+                                except Exception as _e:
+                                    print(f"[clothing] change-detection failed: {_e}; honouring args as-is")
+                                    # Fail-open so we don't block on classifier errors
+                                    _changed_actors = set(_args_clothing.keys())
+
+                            _accepted_overrides: dict[str, str] = {}
+                            for _ac, _cl in _args_clothing.items():
+                                if not _cl:
+                                    continue
+                                already_locked = _ac in merged_clothing and bool(merged_clothing[_ac])
+                                if already_locked and _ac not in _changed_actors:
+                                    # Lock holds — drop the paraphrase
+                                    if str(_cl).strip() != merged_clothing[_ac].strip():
+                                        print(f"[clothing] {_ac}: kept lock (LLM: no change) "
+                                              f"locked={merged_clothing[_ac][:50]!r} "
+                                              f"narrator_tried={str(_cl)[:50]!r}")
+                                    continue
+                                # First time this actor is dressed OR a real change occurred
+                                merged_clothing[_ac] = _cl
+                                _accepted_overrides[_ac] = _cl
+                            # Replace args.clothing_state with ONLY accepted overrides so the
+                            # consistency tracker (update_from_tool_call below) doesn't write
+                            # the paraphrases back into session.consistency.clothing.
+                            if "clothing_state" in args:
+                                args["clothing_state"] = _accepted_overrides
 
                             # Locked head/shoulders appearance from prior scenes.
                             appearance_state = dict(session.consistency.appearance or {})
@@ -878,6 +913,41 @@ class StoryEngine:
                                             print(f"[appearance] locked {_ac}: {_look[:80]}")
                                     except Exception as _e:
                                         print(f"[appearance] extract for {_ac} failed: {_e}")
+
+                            # Capture clothing — same pattern as appearance, but fires:
+                            #   - on FIRST sighting (no lock yet) AND
+                            #   - whenever the LLM clothing-change classifier flagged this
+                            #     actor as having actually changed outfit in this scene.
+                            # We re-extract from the just-crafted (rich) image prompt rather
+                            # than trusting the narrator's `clothing_state` arg directly,
+                            # because the specialist usually adds detail (cut, materials,
+                            # state) that pins Z-Image rendering across future scenes.
+                            for _ac in actors_present:
+                                if not _ac:
+                                    continue
+                                _no_lock = not (session.consistency.clothing.get(_ac) or "")
+                                _just_changed = _ac in _changed_actors
+                                if not (_no_lock or _just_changed):
+                                    continue
+                                try:
+                                    _outfit = await extract_clothing(
+                                        self.grok,
+                                        codename=_ac,
+                                        image_prompt=crafted_prompt,
+                                        grok_model=session.grok_model,
+                                    )
+                                    if _outfit:
+                                        session.consistency.clothing[_ac] = _outfit
+                                        # Reflect into args so update_from_tool_call won't
+                                        # later overwrite with the narrator's vague version.
+                                        if isinstance(args.get("clothing_state"), dict):
+                                            args["clothing_state"][_ac] = _outfit
+                                        else:
+                                            args["clothing_state"] = {_ac: _outfit}
+                                        tag = "first" if _no_lock else "changed"
+                                        print(f"[clothing] {tag}-locked {_ac}: {_outfit[:80]}")
+                                except Exception as _e:
+                                    print(f"[clothing] extract for {_ac} failed: {_e}")
 
                             # Inject specialist output back into args so downstream
                             # code (consistency tracker, _generate_image, frontend

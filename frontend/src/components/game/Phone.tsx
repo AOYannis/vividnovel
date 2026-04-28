@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGameStore } from '../../stores/gameStore'
 import { useT } from '../../i18n'
-import { streamPhoneChat } from '../../api/client'
+import { streamPhoneChat, fetchWorld } from '../../api/client'
+import type { KnownWhereabout } from '../../api/types'
 
 const AVATARS: Record<string, string> = {
   nataly: '👩‍🦰', shorty_asian: '👩‍🦱', blonde_cacu: '👱‍♀️',
@@ -86,30 +87,38 @@ export default function Phone({ sessionSwitcher, onCloseAll }: PhoneProps = {}) 
     try {
       await streamPhoneChat(
         { sessionId, characterCode: phoneActiveChar, message: msg },
-        // onMessageDelta
-        (text) => setStreamingText((s) => s + text),
-        // onMessageDone
-        (text) => {
-          setStreamingText('')
-          const s = useGameStore.getState()
-          const msgs = s.phoneChats[phoneActiveChar!] || []
-          useGameStore.setState({
-            phoneChats: { ...s.phoneChats, [phoneActiveChar!]: [...msgs, { role: 'character' as const, text }] },
-          })
+        {
+          onMessageDelta: (text) => setStreamingText((s) => s + text),
+          onMessageDone: (text) => {
+            setStreamingText('')
+            const s = useGameStore.getState()
+            const msgs = s.phoneChats[phoneActiveChar!] || []
+            useGameStore.setState({
+              phoneChats: { ...s.phoneChats, [phoneActiveChar!]: [...msgs, { role: 'character' as const, text }] },
+            })
+          },
+          onSelfieGenerating: () => setSelfieLoading(true),
+          onSelfieReady: (url) => {
+            setSelfieLoading(false)
+            const s = useGameStore.getState()
+            const msgs = s.phoneChats[phoneActiveChar!] || []
+            useGameStore.setState({
+              phoneChats: { ...s.phoneChats, [phoneActiveChar!]: [...msgs, { role: 'character' as const, text: '', imageUrl: url }] },
+            })
+          },
+          onRendezvousAdded: (rdv: KnownWhereabout) => {
+            // Inline confirmation chip in the chat thread
+            const s = useGameStore.getState()
+            const msgs = s.phoneChats[phoneActiveChar!] || []
+            useGameStore.setState({
+              phoneChats: { ...s.phoneChats, [phoneActiveChar!]: [...msgs, { role: 'system' as const, text: '', rendezvous: rdv }] },
+            })
+            // Refresh world payload so the map / agenda / RDV badges update.
+            // Also picks up any new_location proposals tied to the rdv.
+            if (sessionId) fetchWorld(sessionId).then((p) => useGameStore.getState().setWorldPayload(p)).catch(() => {})
+          },
+          onError: (error) => { console.error('Phone chat error:', error) },
         },
-        // onSelfieGenerating
-        () => setSelfieLoading(true),
-        // onSelfieReady
-        (url) => {
-          setSelfieLoading(false)
-          const s = useGameStore.getState()
-          const msgs = s.phoneChats[phoneActiveChar!] || []
-          useGameStore.setState({
-            phoneChats: { ...s.phoneChats, [phoneActiveChar!]: [...msgs, { role: 'character' as const, text: '', imageUrl: url }] },
-          })
-        },
-        // onError
-        (error) => { console.error('Phone chat error:', error) },
       )
     } catch (e) {
       console.error('Phone chat failed:', e)
@@ -176,26 +185,54 @@ export default function Phone({ sessionSwitcher, onCloseAll }: PhoneProps = {}) 
                   Start a conversation...
                 </p>
               )}
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 ${
-                    msg.role === 'user'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-neutral-800 text-neutral-200'
-                  }`}>
-                    {msg.imageUrl && (
-                      <img
-                        src={msg.imageUrl}
-                        alt=""
-                        className="rounded-xl mb-2 w-full max-w-[200px]"
-                      />
-                    )}
-                    {msg.text && (
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                    )}
+              {messages.map((msg, i) => {
+                // System row: rendez-vous confirmation chip, centered, distinct style.
+                if (msg.role === 'system' && msg.rendezvous) {
+                  const r = msg.rendezvous
+                  const world = useGameStore.getState().world
+                  const loc = world?.locations.find((l) => l.id === r.location_id)
+                  const SLOT_FR: Record<string, string> = { morning: 'matin', afternoon: 'après-midi', evening: 'soir', night: 'nuit' }
+                  const slotLabel = SLOT_FR[r.slot] || r.slot
+                  const dayLabel = world && r.day === world.day ? "aujourd'hui" : `J${r.day}`
+                  return (
+                    <div key={i} className="flex justify-center">
+                      <div className="max-w-[90%] rounded-xl px-3 py-2 bg-rose-950/40 border border-rose-800/50 text-rose-100">
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-rose-300/80 mb-1">
+                          <span>⏰</span>
+                          <span>Rendez-vous noté</span>
+                        </div>
+                        <div className="text-xs leading-snug">
+                          {dayLabel} · {slotLabel}
+                          {loc && (<> · <span className="font-medium">{loc.name}</span></>)}
+                        </div>
+                        {r.source && (
+                          <div className="text-[10px] text-rose-300/60 italic mt-0.5">« {r.source} »</div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                }
+                return (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 ${
+                      msg.role === 'user'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-neutral-800 text-neutral-200'
+                    }`}>
+                      {msg.imageUrl && (
+                        <img
+                          src={msg.imageUrl}
+                          alt=""
+                          className="rounded-xl mb-2 w-full max-w-[200px]"
+                        />
+                      )}
+                      {msg.text && (
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
               {/* Streaming indicator */}
               {streamingText && (
                 <div className="flex justify-start">
@@ -312,7 +349,11 @@ export default function Phone({ sessionSwitcher, onCloseAll }: PhoneProps = {}) 
                         </div>
                         {lastMsg && (
                           <p className="text-xs text-neutral-500 truncate mt-0.5">
-                            {lastMsg.imageUrl ? '📷 Photo' : lastMsg.text?.slice(0, 40)}
+                            {lastMsg.rendezvous
+                              ? '⏰ Rendez-vous noté'
+                              : lastMsg.imageUrl
+                              ? '📷 Photo'
+                              : lastMsg.text?.slice(0, 40)}
                           </p>
                         )}
                       </div>

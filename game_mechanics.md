@@ -47,9 +47,9 @@ Each cast member has a `CharacterState` (`world.py:190`) generated at game start
 | `overrides` | per-day-slot pinning, used by `set_rendezvous` |
 | `today_mood` | refreshed by daily tick |
 | `intentions_toward_player` | refreshed by daily tick |
-| `recent_event` | one-line "what happened to them today" — refreshed by daily tick |
+| `recent_events` | **list** of `{day, text}` (capped at `MAX_RECENT_EVENTS = 7`) — appended each daily tick. The `cs.recent_event` (singular) property still returns the latest entry's text for back-compat |
 | `last_tick_day` | bookkeeping: never re-tick the same day |
-| `temperament` | `reserved | normal | wild` — drives reaction cues, NOT mood gating |
+| `temperament` | `reserved | normal | wild` — drives reaction cues + trust delta multipliers (NOT mood gating) |
 
 ### Schedules
 - Pipe-separated multi-candidates ("`gym|cafe`") resolve via `stable_choice((code, day, slot), candidates)` — deterministic per character per day, but varies day-to-day.
@@ -62,9 +62,11 @@ Each cast member has a `CharacterState` (`world.py:190`) generated at game start
 
 ### Daily tick (`agent.daily_tick`)
 - Runs at the start of any sequence where at least one character has `last_tick_day < world.day` — i.e., when a day has rolled over off-screen.
-- For each lagging character, fires a parallel Grok call that returns `{today_mood, intentions_toward_player, recent_event}` based on personality + temperament + relationship level + previous-day state.
-- `recent_event` is "what plausibly happened to them off-screen yesterday" — a small life beat, NEVER about the player. Surfaces in the narrator prompt's *Personnages présents* block as `Hier (off-screen) : <event>` for casual reference.
-- Cost: ~$0.0002 per game day per cast member. Failure is non-blocking — the character keeps yesterday's state.
+- **Throttling**: only ticks characters with `relationships[code].level >= 1` (ones the player has actually met). Saves cost on never-met cast; their state stays frozen until the player encounters them.
+- For each eligible character, fires a parallel Grok call that returns `{today_mood, intentions_toward_player, recent_event}` based on personality + temperament + relationship level + previous-day state + recent_events history.
+- `recent_event` is **appended** to `cs.recent_events` (capped at 7, oldest evicted). Each entry is a small off-screen life beat (a phone call, a routine work moment, a tiny realisation) — NEVER about the player.
+- The narrator prompt's *Personnages présents* block surfaces the **last 3 events with day stamps** as a "Vie hors-scène (récente)" sublist — much richer continuity than the previous single "Hier" line.
+- Cost: ~$0.0002 per game day per eligible character. Failure is non-blocking — characters just keep yesterday's state.
 
 ---
 
@@ -160,6 +162,24 @@ The narrator does NOT write the Z-Image prompt. A specialist composes it (§5.1)
   - L2 × wild: *"embrasse facilement, se laisse caresser par-dessus les vêtements ; pousserait elle-même vers plus si rien ne la freine."*
 - Closing rule tells the narrator: use these as **narrative drivers, not constraints**. If the player tries something above the current level, the character HÉSITE / RECULE / REFUSE GENTIMENT — that creates the seduction tension. Mood gate handles the mechanical guardrail.
 
+### 4.8 Trust score (bidirectional, temperament-curved)
+On top of the per-scene mood-based level bumps, every relationship now carries a continuous **`trust: float`** score that drifts up and down based on the player's behaviour. Implementation in `backend/trust.py`.
+
+- **Extractor** (`agent.extract_trust_deltas`): runs at the end of every sequence with `present_characters`. Reads `previous_choice + narration + per-char temperaments` and returns a list of `{char, delta ∈ -3..+3, reason}`. Calibration: ±3 for defining moments (real betrayal / real bonding), ±1 for small good/bad signals, 0 if nothing meaningful happened.
+- **Temperament curves** (per character):
+  | | pos_mult | neg_mult | thresh |
+  |---|---|---|---|
+  | wild | 1.5× | 0.7× | 0.7× |
+  | normal | 1× | 1× | 1× |
+  | reserved | 0.7× | 1.3× | 1.4× |
+  
+  `pos_mult` and `neg_mult` scale the raw delta before adding to trust. `thresh` scales the level transition bands. So a wild character grows trust faster + drops slower + needs less to level up; reserved is the inverse.
+- **Level transitions** from trust (normal-temperament thresholds): `L1 ≥ 1`, `L2 ≥ 4`, `L3 ≥ 9`, `L4 ≥ 16`, `L5 ≥ 26`. Reserved characters need ×1.4 those values; wild characters need ×0.7.
+- **Mood floor protection** (`record_scene_mood_floor`): every per-scene mood bump also locks `rel.scene_mood_floor_level`. The level NEVER drops below the floor, so a kiss scene physically happening locks `level >= 2` even if subsequent trust drops would otherwise push back to `1`. Mechanical reality wins over score-based extrapolation.
+- **History**: `rel.trust_history` keeps the last 20 delta records `{sequence, raw_delta, applied_delta, new_trust, new_level, level_change, reason}` for the debug UI.
+- Backend log per delta: `[trust] nesra (reserved): raw=+2 applied=+1.4 → trust=3.5 L1 ↑  (player listened patiently when she opened up)`.
+- Cost: ~$0.00006 per sequence (single Grok call, only fires when `present_characters` is non-empty).
+
 ---
 
 ## 5. Image generation
@@ -230,9 +250,17 @@ The narrator does NOT write the Z-Image prompt. A specialist composes it (§5.1)
 - Each segment is rewritten by Grok via `tts.enhance_speech_text` with a `mode`-specific brief (`_MODE_BRIEFS`):
   - **narration** mode: slow, breathy, restrained — `[pause]` between sentences, `<soft>` for confidences, NEVER `<loud>` / `<fast>` / `[laugh]`.
   - **dialogue** mode: conversational pace, expressive tags, `[laugh]` / `[chuckle]` / `[sigh]` allowed.
+  - Both modes ship with a hard `⚠️ Pick ONLY ONE wrapping tag per sentence/line. NEVER stack two.` rule (the next bullet explains why).
 - The full TTS tag dictionary lives at `tts.TTS_TAG_GUIDE`.
+- **Tag flattening** (`_sanitize_tts_tags`): xAI TTS doesn't reliably handle nested wrapping tags — when it bails, it speaks the inner tag name aloud as a literal word ("slow", "soft", "lower-pitch"). The sanitizer now drops any wrapping-tag opening that arrives while another wrapping tag is already on the stack, keeping ONLY the outermost. So `<soft><slow><lower-pitch>X</lower-pitch></slow></soft>` collapses to `<soft>X</soft>` before reaching xAI. Sequential separate tags pass through unchanged; single-tag sentences pass through unchanged.
 
-### 6.4 Video lipsync gating
+### 6.4 Narrator voice setting (UI)
+- The setup page exposes **two voice dropdowns**:
+  - **Narrator voice** (default `sal` neutral) — used for every narration prose segment regardless of who's in the scene.
+  - **Dialogue fallback** (default `ara`) — used for dialogue when no per-character voice is auto-assigned (Phase B handles the rest).
+- Backend: `narration_voice` field on `StartGameRequest`, stored at `session.video_settings["narration_voice"]`.
+
+### 6.5 Video lipsync gating
 - When `voice_to_video=True` AND the scene has dialogue → fire ONE dialogue-only TTS call, audio is fed to P-Video for lip-sync.
 - When `voice_to_video=True` BUT the scene has NO dialogue → skip the lip-sync TTS, fire a standalone narration TTS instead. Video gen falls back to its prompt-only path (ambient sounds, breath). Stops the "character lip-syncing the narrator's words in `ara` voice" failure mode.
 
@@ -270,7 +298,10 @@ iOS Safari grants `audio.play()` per-element, only to elements that started load
 
 ### 8.1 List view (current)
 - All locations shown as buttons with type icon + name + description.
-- Per-location chips: cast members likely present *now* (from the resolver's `presence_now` payload), green-tinted.
+- Per-location chips: cast members likely present, green-tinted. **The chip is a forecast** of who you'll find when you go:
+  - For the **player's current location** → resolver at the **current** slot ("X is here right now").
+  - For **other** locations → resolver at the **NEXT** slot ("X will be there when you arrive"), because clicking a non-current location calls `set_location(advance=True)` which bumps the slot. Without this split the chip lied: "Nesra at the bar" (evening) → tap → time advances to night → empty bar.
+  - Tooltip wording branches: `map.character_here_tooltip` for current location, `map.character_on_arrival_tooltip` for others.
 - Per-location ⏰ RDV chip (rose-tinted) when an imminent rendez-vous targets that location.
 - Top-of-modal teaser block listing all `now` / `next` rendez-vous with the source quote.
 - "Recent" footer showing the player's last 5 (day, slot, location) moves.
@@ -313,7 +344,39 @@ Cost roll-up is logged to the per-sequence JSON event log at `backend/logs/last_
 
 ---
 
-## 10. Cost & latency notes
+## 10. Mem0 long-term memory
+
+`backend/memory.py` wraps the [mem0](https://mem0.ai) client. Three distinct namespaces, all hashed `user_id`s prefixed for clarity:
+
+| Scope | id format | What it stores | When recalled |
+|---|---|---|---|
+| **session_narrative** | `gb<md5(user:session)>` | Per-game facts: setting label, sequence narrations, choices made | Recalled at every sequence start (`recall_narrative_context`) when `sequence_number > 0`. Injected as `## Mémoire narrative` block. |
+| **persistent** | `gbp<md5(user:setting)>` | Cross-session facts SHARED across all games in the same setting (cast encounters, player decision patterns) | Recalled at every sequence start (`recall_persistent_memory`). Injected as `## Mémoire persistante (histoires précédentes)` block — the narrator treats these as *déjà-vu* shared past, never recites them verbatim. |
+| **per-character** | `gbc<md5(user:setting:char:code)>` | What ONE specific character "remembers" about the player. Cross-session, scoped to (user + setting + character_code) so a character truly recognises the player when they meet again in a new game. | Recalled per-character at sequence start (`recall_character_memory`). Injected as `## Mémoire des personnages` per-character sublist. |
+
+### Cross-character leak (fixed)
+Before the fix, `store_sequence_narrative(...)` was called with `characters = session.cast.get("actors")` — i.e. the FULL cast. Every cast member's per-character memory got the narration of every sequence, even ones they were never in. Léa "remembered" Nesra's bar evening because her store was hit too.
+
+Now (`backend/story_engine.py`, post-sequence): `_chars_in_sequence` is built from the union of every scene's `actors_present` (collected during the round) plus `present_characters` (resolver placement) as a backstop. Only characters who actually appeared get their per-character memory written to.
+
+### Debug surface
+- Endpoint `GET /api/debug/mem0/all/{session_id}` returns all three scopes in one call: `session_narrative`, `persistent`, and `per_character` (one entry per cast member with the raw memories + scope_id + timestamps).
+- Frontend client: `getAllMem0(sessionId)` → `Mem0AllResponse` (`frontend/src/api/client.ts`).
+- DebugPanel **Mem0 tab** shows:
+  - The existing live-context panel (formatted blocks injected into the prompt).
+  - **Mémoire par personnage** — one card per cast member with codename + fact count + scope_id + the raw memory list with creation timestamps. Empty card = "no memories stored for this character" — useful to verify isolation.
+  - Two collapsible `<details>` for the raw session-narrative + persistent dumps.
+- The refresh button refetches both the formatted block AND the raw all-scopes endpoint.
+
+### Cleanup
+- `delete_session_memories(user_id, session_id)` — wipe one game.
+- `delete_persistent_memories(user_id, setting_id)` — wipe persistent for a setting (the "Effacer les souvenirs" button on Setup).
+- `delete_all_user_memories(user_id, [setting_ids])` — wipe persistent across all settings.
+- Per-character memories don't have a dedicated delete helper yet — clear via the mem0 dashboard by `user_id` if needed.
+
+---
+
+## 11. Cost & latency notes
 
 Per sequence (8 scenes), slice mode, voice on:
 - **Narrator Grok call**: ~$0.005-0.01 input, mostly cached after sequence 1. Smaller after Phase 3 lean refactor.
@@ -326,32 +389,38 @@ Per sequence (8 scenes), slice mode, voice on:
 
 ---
 
-## 11. File map (slice-mode-relevant)
+## 12. File map (slice-mode-relevant)
 
 **Backend**
-- `backend/world.py` — World/Location/CharacterState, time, presence resolver, rendez-vous helpers
-- `backend/agent.py` — `generate_world_and_agents`, `daily_tick`, `extract_whereabouts`
+- `backend/world.py` — World/Location/CharacterState, time, presence resolver, rendez-vous helpers, `MAX_RECENT_EVENTS`
+- `backend/agent.py` — `generate_world_and_agents`, `daily_tick`, `extract_whereabouts`, `extract_trust_deltas`
 - `backend/scene_agent.py` — `craft_image_prompt`, `extract_appearance`, POV sanitiser
 - `backend/mood_gate.py` — `gate_mood`, `infer_mood_from_summary`
 - `backend/presence_gate.py` — `gate_presence`
+- `backend/trust.py` — `apply_trust_delta` (temperament curves), `record_scene_mood_floor`, `thresholds_for`
+- `backend/memory.py` — mem0 wrappers: `store_sequence_narrative`, `store_character_chat`, `recall_*`, three id helpers (`_user_session_id`, `_persistent_user_id`, `_character_memory_id`)
 - `backend/prompt_builder.py` — `_build_slice_prompt`, `_build_slice_intro_prompt`, `_build_slice_solo_prompt`, all the `_section_*` helpers, reaction cue matrix
 - `backend/story_engine.py` — `_orchestrate` (the loop above), `_fire_tts_task` (multi-voice path), `_clean_narration` (codename scrubber)
-- `backend/tts.py` — `parse_speech_segments`, `enhance_speech_text` (mode-aware), `extract_dialogue`, `concat_audio_chunks`, `dedupe_boundary_pauses`
-- `backend/main.py` — `/api/game/start` (slice path), `/api/game/sequence`, `/api/game/world`, `/api/game/go_to_location`, `_build_world_payload`
+- `backend/tts.py` — `parse_speech_segments`, `enhance_speech_text` (mode-aware), `extract_dialogue`, `concat_audio_chunks`, `dedupe_boundary_pauses`, `_sanitize_tts_tags` (with nested-tag flattening)
+- `backend/main.py` — `/api/game/start` (slice path), `/api/game/sequence`, `/api/game/world`, `/api/game/go_to_location`, `/api/debug/mem0/all/{session_id}`, `_build_world_payload`
 - `backend/db.py` — session save/restore including `_world_state`, `_character_states`, `_known_whereabouts`, `_recent_missed_rendezvous`
 
 **Frontend**
-- `frontend/src/components/game/MapModal.tsx` — list view, RDV badges, agenda, history
+- `frontend/src/components/game/MapModal.tsx` — list view, RDV badges, agenda, history, next-slot chip forecast
 - `frontend/src/components/game/SceneCard.tsx` — scroll-snap target, audio via singleton hook
 - `frontend/src/components/game/ChoicesPanel.tsx` — adds "Aller ailleurs" 5th choice
+- `frontend/src/components/WorldDebugTab.tsx` — per-character debug card with temperament chip, trust score, scene/intimate counts, mood floor, recent_events log, trust deltas history
+- `frontend/src/components/DebugPanel.tsx` — Mem0 tab with per-character cards, raw scope dumps
 - `frontend/src/hooks/useSceneAudio.ts` — singleton `<audio>` + gesture warmup (mobile fix)
 - `frontend/src/pages/GamePage.tsx` — IntersectionObserver, mounts the audio singleton, top-bar world badge, map button
-- `frontend/src/stores/gameStore.ts` — `world`, `characterStates`, `knownWhereabouts`, `presenceNow`, `upcomingRendezvous`
+- `frontend/src/pages/SetupPage.tsx` — narrator voice + dialogue fallback dropdowns
+- `frontend/src/stores/gameStore.ts` — `world`, `characterStates`, `knownWhereabouts`, `presenceNow`, `upcomingRendezvous`, `relationships` (with trust history)
+- `frontend/src/api/client.ts` — `getAllMem0` for per-character debug
 - `frontend/src/i18n/translations.ts` — `map.*` keys (fr + en, others fall back to fr)
 
 ---
 
-## 12. TODO — discussed but not yet shipped
+## 13. TODO — discussed but not yet shipped
 
 Loose backlog of features we scoped or proposed during development but deferred. Roughly grouped by area; effort estimates are rough.
 
@@ -362,10 +431,12 @@ Loose backlog of features we scoped or proposed during development but deferred.
 - **Auto-suggest "go to RDV" choice** — when an RDV is `next` and the player isn't at the location, inject a deterministic 5th choice `Aller au rendez-vous avec X` so they don't have to navigate.
 
 ### Relationships & character life
-- **Bidirectional trust deltas** — post-sequence Grok extractor that reads `previous_choice + narration` and returns `{code: delta ∈ {-2..+2}}`. Currently relationships only ever go UP (or down via missed RDVs); a clumsy answer should also drop trust. ~1-2h.
-- **Per-temperament difficulty curves** — `wild` characters need fewer trust points to unlock each level, `reserved` need more. Just multipliers on the deltas. ~30min once deltas land.
-- **`recent_event` log instead of single field** — keep last N off-screen events per character so the narrator has a richer memory (currently overwritten each day). ~1h.
-- **Daily tick throttling** — only run for characters with `level > 1` to save cost. Currently fires for everyone every day. ~10min if needed.
+- ✅ ~~**Bidirectional trust deltas**~~ — shipped (§4.8). `agent.extract_trust_deltas` + `trust.apply_trust_delta`.
+- ✅ ~~**Per-temperament difficulty curves**~~ — shipped (§4.8). Wild/normal/reserved curves on both deltas and thresholds.
+- ✅ ~~**`recent_event` log instead of single field**~~ — shipped (§2). `cs.recent_events: list[{day, text}]`, capped at 7.
+- ✅ ~~**Daily tick throttling**~~ — shipped (§2). Only ticks characters with `level >= 1`.
+- **Mem0 per-character memory clearer** — small Setup/Debug button to wipe ONE character's per-character mem0 namespace (e.g. for testing or when a character has accumulated stale facts from a buggy run). Backend helper exists implicitly (`_client.delete_all(user_id=...)`) — just needs an endpoint + button.
+- **Trust-aware choices** — when crafting end-of-sequence choices, the narrator could see the trust score per present character so it picks pro/anti-character options consistent with the relationship arc.
 
 ### TTS & audio
 - **Player-gender voice fallback (Phase C)** — when narrator slips and writes a line attributable to the player ("Tu murmures…", first-person dialogue), voice it with `player_voice = {male: rex, female: eve, other: sal}` instead of the speaker voice. Detect via heuristics on dialogue surroundings. Log slips so we can tighten the narrator prompt. ~30min.

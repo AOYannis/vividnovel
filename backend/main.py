@@ -841,6 +841,57 @@ async def phone_chat(req: PhoneChatRequest, user: dict = Depends(get_current_use
                     None, lambda: store_character_chat(_uid, _char, f"[phone] {_msg}", _resp, setting_id=_setting)
                 )
 
+            # ── Phone rendez-vous extraction ──────────────────────────────
+            # If this exchange agreed on a meeting, register it in
+            # session.known_whereabouts so the map/agenda show it and the
+            # presence gate honours it later. Slice mode only.
+            if session.world is not None:
+                try:
+                    from agent import extract_phone_rendezvous
+                    new_rdvs = await extract_phone_rendezvous(
+                        grok_client,
+                        player_msg=req.message,
+                        char_response=message_text,
+                        char_code=req.character_code,
+                        current_day=session.world.day,
+                        current_slot=session.world.slot,
+                        locations=session.world.locations,
+                        grok_model=session.grok_model,
+                    )
+                    seen = {(m["char"], m["day"], m["slot"], m["location_id"])
+                            for m in (session.known_whereabouts or [])}
+                    existing_loc_ids = {l.id for l in session.world.locations}
+                    added: list[dict] = []
+                    for entry in new_rdvs:
+                        # Register a proposed new location BEFORE adding the rdv
+                        new_loc = entry.pop("new_location", None) if isinstance(entry, dict) else None
+                        if new_loc and new_loc.get("id") not in existing_loc_ids:
+                            from world import Location as _Loc
+                            session.world.locations.append(_Loc(
+                                id=new_loc["id"],
+                                name=new_loc.get("name") or new_loc["id"],
+                                type=new_loc.get("type") or "other",
+                                description=new_loc.get("description") or "",
+                            ))
+                            existing_loc_ids.add(new_loc["id"])
+                            print(f"[phone] +location {new_loc['id']} ({new_loc.get('name')!r})")
+                        key = (entry["char"], entry["day"], entry["slot"], entry["location_id"])
+                        if key in seen:
+                            continue
+                        session.known_whereabouts.append(entry)
+                        seen.add(key)
+                        added.append(entry)
+                    if added:
+                        # Persist + notify the frontend so map/agenda refresh.
+                        import db as _db
+                        _db.fire_and_forget(_db.save_session(session))
+                        for rdv in added:
+                            print(f"[phone] +rdv {rdv['char']} day {rdv['day']} {rdv['slot']} "
+                                  f"@ {rdv['location_id']} (« {rdv.get('source','')[:60]} »)")
+                            yield f"data: {json.dumps({'type': 'rendezvous_added', 'rendezvous': rdv})}\n\n"
+                except Exception as _e:
+                    print(f"[phone] rdv extraction failed: {_e}")
+
             chat_log.finish()
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as e:

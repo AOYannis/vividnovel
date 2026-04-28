@@ -26,24 +26,29 @@ INLINE TAGS — single token, no wrapping. Place at the exact moment the sound o
   [laugh] [chuckle] [giggle] [cry]
   [tsk] [tongue-click] [lip-smack] [hum-tune]
 
-WRAPPING TAGS — MUST wrap text with both opening and closing tag, like XML:
-  <soft>text</soft>      <whisper>text</whisper>      <loud>text</loud>
-  <slow>text</slow>      <fast>text</fast>
-  <higher-pitch>text</higher-pitch>     <lower-pitch>text</lower-pitch>
-  <build-intensity>text</build-intensity>     <decrease-intensity>text</decrease-intensity>
-  <emphasis>text</emphasis>     <sing-song>text</sing-song>
-  <singing>text</singing>     <laugh-speak>text</laugh-speak>
+WRAPPING TAGS — MUST wrap text with both opening and closing tag, like XML.
+**ONLY TWO are reliable** on the xAI TTS engine:
+  <soft>text</soft>      <whisper>text</whisper>
+
+⛔ DO NOT use any other wrapping tag. The engine reads them ALOUD as literal
+words ("slow", "loud", "lower-pitch", "build-intensity"…). Even when properly
+opened and closed. The sanitizer will strip them server-side, but you waste
+characters and the prompt-cache benefit by writing them.
+
+Express other intentions through:
+  - WORD CHOICE (a slow line is short and unhurried; a loud line uses
+    capitalised emphasis words; a low pitch is a husky character voice).
+  - PUNCTUATION (em-dashes, ellipses, line breaks for natural pacing).
+  - Inline tags below for breath/pause beats.
 
 ═══ SYNTAX RULES (violation = the tag name is spoken aloud) ═══
 1. Wrapping tags MUST be written as `<tag>text</tag>`. NEVER as `[soft]`, `[whisper]`, etc.
 2. Every `<tag>` you open MUST have a matching `</tag>`.
 3. Never nest the same tag inside itself.
-4. **NEVER STACK / NEST DIFFERENT WRAPPING TAGS around the same text.** xAI TTS
-   does not handle nested wrapping tags reliably — the inner tag name gets
-   spoken aloud as a literal word ("slow", "soft", "lower-pitch"). Pick the
-   ONE most-impactful tag for each clause. Never write
-   `<soft><slow>text</slow></soft>` — pick `<soft>text</soft>` or
-   `<slow>text</slow>` alone.
+4. **NEVER STACK / NEST WRAPPING TAGS around the same text.** xAI TTS does
+   not handle nested tags reliably — the inner tag name gets spoken aloud as
+   a literal word. Pick the ONE most-impactful tag for each clause.
+   Never write `<soft><whisper>text</whisper></soft>` — pick one.
 5. NEVER use markdown, stage directions, or character names.
 
 ═══ EXPRESSION PALETTE — SENSUAL ROMANCE / NSFW FOCUS ═══
@@ -52,30 +57,28 @@ Pick ONE wrapping tag per sentence/clause — never stack them.
 
 NARRATOR PROSE (context narration for romance/NSFW stories):
   • Default tone: warm, velvety, intimate, and seductive — like a lover whispering the story directly into the listener’s ear.
-  • Use ONE of <slow>, <soft>, or <lower-pitch> per sentence — the one that fits
-    best. Vary across sentences; never stack two of them on the same clause.
-  • For intimate or erotic moments: prefer <whisper>...</whisper> alone, OR
-    <soft>...</soft> alone. Pick ONE.
+  • Use ONE of <soft> or <whisper> per sentence — the one that fits best.
+    Vary across sentences; never stack the two on the same clause.
+  • For intimate or erotic moments: prefer <whisper>...</whisper> alone for
+    the most confidential lines, OR <soft>...</soft> alone for the rest.
   • Breath sounds are allowed but SPARINGLY and only at natural emotional peaks:
     → [inhale] or [breath] when tension builds
     → [exhale] or [sigh] after a particularly charged moment
     → NEVER put [breath], [exhale], or [sigh] at the end of every sentence.
-    - NEVER use "lower pitch" as words — use the tag <lower-pitch>...</lower-pitch>.
-  • Use <whisper> only for the most confidential or highly erotic inner thoughts.
   • Use [pause] or [long-pause] for delicious tension between actions.
 
 DIALOGUES (text inside quotes):
-  • Much richer expression allowed — make it feel alive and aroused.
+  • Much richer expression allowed via WORD CHOICE and punctuation.
   • Intimate/sexy line → <whisper>...</whisper> alone (don't combine with anything).
-  • Passionate line → <build-intensity>...</build-intensity> OR <emphasis>...</emphasis>
-  • Teasing/playful → <sing-song>...</sing-song> or [chuckle]
+  • Passionate line → CAPS on the impact word, em-dashes for breathless rhythm.
+  • Teasing/playful → [chuckle] inline at the natural pause.
   • One [breath]/[sigh] per line max, placed naturally.
 
 ═══ ANTI-PATTERNS — DO NOT DO THESE ═══
-  • STACKING wrapping tags ("<soft><slow>...</slow></soft>") — the inner tag is spoken aloud.
+  • STACKING wrapping tags ("<soft><whisper>...</whisper></soft>") — the inner tag is spoken aloud.
+  • Using ANY wrapping tag other than <soft> or <whisper> — they all leak.
   • Adding [breath] or [exhale] at the end of every narration sentence.
   • Over-tagging every single sentence with breath sounds.
-  • Using <slow> on single words instead of whole clauses.
   • Putting breathing tags in every prose sentence.
 """
 
@@ -200,11 +203,14 @@ INLINE_TTS_TAGS = frozenset({
     "laugh", "chuckle", "giggle", "cry",
     "tsk", "tongue-click", "lip-smack", "hum-tune",
 })
+# Empirically narrowed to the two wrapping tags that consistently survive
+# the xAI TTS engine without being read aloud as literal words. Even simple
+# tags like <slow>, <fast>, <loud>, <emphasis> have been observed to leak
+# (observed 2026-04-28). The trade-off is less expressivity, but this is
+# the only set we trust to never produce "and now she said slow as the
+# camera pans..." in playback.
 WRAPPING_TTS_TAGS = frozenset({
-    "soft", "whisper", "loud", "slow", "fast",
-    "higher-pitch", "lower-pitch",
-    "build-intensity", "decrease-intensity",
-    "emphasis", "sing-song", "singing", "laugh-speak",
+    "soft", "whisper",
 })
 
 _BRACKET_TAG_RE = _re.compile(r"\[([a-zA-Z][a-zA-Z\-]*)\]")
@@ -306,15 +312,18 @@ _MODE_BRIEFS = {
         "- Delivery must feel slow, soft, and husky throughout the entire narration.\n"
         "- Use gentle pauses for tension and very subtle breath sounds only at natural emotional peaks.\n"
         "- Keep everything elegant and seductive — never robotic or overdone.\n"
-        "- ⚠️ Pick ONLY ONE wrapping tag per sentence (one of <slow>, <soft>, "
-        "<lower-pitch>, <whisper>). NEVER stack two of them around the same text — "
-        "xAI TTS reads the inner tag name aloud as a literal word."
+        "- ⚠️ ONLY two wrapping tags are reliable: <soft>...</soft> and "
+        "<whisper>...</whisper>. Pick at most ONE per sentence; never stack them. "
+        "Any other wrapping tag (<slow>, <loud>, <emphasis>, etc.) gets read aloud "
+        "as a literal word by xAI TTS — DO NOT use them. Convey slow / loud / pitched "
+        "delivery through word choice, punctuation, and the [pause] inline tag."
     ),
     "dialogue": (
         "MODE = DIALOGUE (a character speaking out loud, in scene).\n"
         "- Make the delivery match the emotion: seductive, aroused, teasing, or passionate.\n"
         "- Allow natural breath and intensity changes that feel real and erotic.\n"
-        "- ⚠️ Pick ONLY ONE wrapping tag per line. NEVER stack two."
+        "- ⚠️ ONLY two wrapping tags are reliable: <soft>...</soft> and <whisper>...</whisper>. "
+        "Pick at most ONE per line; never stack them. Other wrapping tags leak as spoken words."
     ),
 }
 
