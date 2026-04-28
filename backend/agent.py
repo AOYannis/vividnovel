@@ -227,11 +227,13 @@ async def generate_world_and_agents(
     }.get(language, "French")
 
     sys_msg = (
-        "You design a tiny lived-in world for an adult slice-of-life game: a setting-themed "
-        "location set + the daily routines of a small cast. Output strict JSON. Keep names "
-        "and descriptions immersive in the chosen setting (pirate game = pirate names, "
-        "futurist game = futurist names, etc.). Do NOT use generic placeholder names from "
-        "other settings.\n\n"
+        "You design a tiny lived-in world for an interactive adult fiction game: "
+        "a SETTING-FAITHFUL location set + the cast's typical whereabouts. The setting "
+        "brief below is the SOURCE OF TRUTH — your locations must feel like they "
+        "belong to THAT setting, not to a generic city. A manor weekend gets manor "
+        "rooms. A yacht cruise gets ship areas. A pirate haven gets pirate-port "
+        "places. A futurist megacity gets futurist places. Never copy locations "
+        "from a different setting.\n\n"
         f"⚠️ CRITICAL: write all `name` and `description` fields in **{lang_label}** "
         f"(this is the player's language). Use names that fit the setting AND the language "
         f"(e.g. for a New York setting in English: 'Your apartment, Brooklyn' not 'Ton appart, "
@@ -275,22 +277,22 @@ TEMPERAMENT — pick ONE per character (drives how quickly they open up to the p
 Pick a MIX across the cast — never make all characters the same temperament.
 
 LOCATIONS — exactly 6 locations, designed for THIS SPECIFIC SETTING:
-- INCLUDE one location with id "home" and type "home" — this is the PLAYER's
-  private space (a flat, a guest room, a cabin, a pod, a tent — whatever the
-  setting calls for). It is where the player starts and where they retreat.
-- The other 5 are entirely yours to invent based on the setting's context.
-  They can be rooms in the same building, decks of a ship, cars of a train,
-  bars/cafés/parks in a city, ruins in a wilderness, modules of a station —
-  whatever makes the setting feel ALIVE and supports natural encounters,
-  conversations, and conflict between the cast and the player.
+- ⚠️ The first location MUST have id EXACTLY "home" (literal string, lowercase,
+  4 letters) AND type "home". This is a TECHNICAL CONSTANT the engine relies on
+  — never invent another id for it (no "your_suite", "guest_room", "cabin_a"
+  etc. as the id). Its DISPLAY NAME however changes wildly with the setting:
+  "Your suite at the manor", "Cabine du capitaine", "Ta capsule, niveau 47",
+  "Your tent at the rented mansion", "Loge d'artiste" — pick what fits. The
+  ID is a constant; the NAME is contextual.
+- The other 5 locations: invent contextual ids (snake_case ASCII, must start
+  with a letter, no digits as first char) like "library_west_wing", "deck_aft",
+  "noodle_bar", "old_docks", "kitchen_main", "ballroom".
 - DO NOT default to a generic urban-modern stack (bar + café + gym + park + club)
   unless the setting genuinely calls for it. A manor whodunnit, a yacht cruise,
   a polar expedition, an astronomical observatory all need very different sets.
 - The `type` field is a loose hint for the map ICON only — pick the closest
   match from {{home, cafe, bar, club, gym, park, work, salon, other}}, or
   "other" if nothing fits. The type does NOT constrain what the place actually is.
-- All `id` values must be lowercase, snake_case, ASCII, no spaces
-  (e.g. "library_west_wing", "deck_aft", "noodle_bar", "old_docks").
 
 SCHEDULES — for each character codename in {cast_codes_str}:
 - "home" is FORBIDDEN as that character's location at any slot — that's the
@@ -350,8 +352,31 @@ Output only the JSON, no commentary."""
             description=str(raw_loc.get("description", ""))[:200],
         ))
 
+    # Recovery: Grok sometimes invents a contextual id ("guest_suite", "your_room")
+    # for the player's home instead of the literal "home" constant the engine
+    # depends on. If we have a location with type="home" but its id isn't "home",
+    # rename it. Or, last resort, force the first location to be home.
+    if not has_home and locations:
+        for i, loc in enumerate(locations):
+            if loc.type == "home":
+                locations[i] = Location(id="home", name=loc.name, type="home", description=loc.description)
+                seen_ids.discard(loc.id)
+                seen_ids.add("home")
+                has_home = True
+                print(f"[agent] recovered: renamed location id '{loc.id}' → 'home' (type=home was set)")
+                break
+    if not has_home and locations:
+        loc = locations[0]
+        locations[0] = Location(id="home", name=loc.name, type="home", description=loc.description)
+        seen_ids.discard(loc.id)
+        seen_ids.add("home")
+        has_home = True
+        print(f"[agent] recovered: forced first location ('{loc.id}', type='{loc.type}') → 'home' as last-resort anchor")
+
     if not locations or not has_home or len(locations) < 4:
         print(f"[agent] world generation returned invalid locations ({len(locations)}, has_home={has_home})")
+        # Surface what Grok returned so we can see WHY validation failed.
+        print(f"[agent] raw output (first 800 chars): {raw[:800]}")
         return [], {}
 
     valid_loc_ids = {loc.id for loc in locations}

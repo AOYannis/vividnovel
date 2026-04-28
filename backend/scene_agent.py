@@ -78,10 +78,28 @@ EVERY image is shot from the player's eyes. Camera = player's eyes.
 - Open the prompt EARLY with a POV marker: `POV first-person`, `eye-level POV`,
   `seen from a first-person perspective`, `looking down`, `looking across`, etc.
 - NEVER describe a third-person wide shot of two full bodies side by side.
-- If the male player has physical presence in the scene, only his **hands, forearms,
-  lower torso** may enter at the frame edges (as if he was looking at them through the
-  camera) — NEVER his full face or body.
-- If the player is not male, same rule: his/her body is the camera, never a tiered subject.
+- The player's body is the camera — only his/her **hands, forearms, lower torso**
+  may enter the frame, NEVER his/her full face or body.
+
+## ⚠️ Player hands/forearms enter from the BOTTOM of the frame — never the sides
+When the player's hands or forearms appear (taking, holding, reaching, touching,
+clinking, gesturing, etc.), they MUST enter the frame from BELOW — like a
+video-game first-person viewmodel. Anchor every hand/forearm to one of:
+`from frame bottom`, `at frame bottom edge`, `at bottom-right edge`, `at bottom-left edge`.
+ONE or TWO hands are both fine — as long as BOTH come from below.
+
+NEVER use the unanchored phrase "at frame edges" (plural). Z-Image reads "edges"
+as the LEFT and RIGHT sides and renders two disembodied hands at left+right,
+which looks like two strangers flanking the subject — not the player.
+
+❌ BAD : "male hands at frame edges holding glasses"
+   → renders two stranger-hands at left and right, breaking POV.
+✅ GOOD: "the player's right hand entering from frame bottom-right, holding a
+        champagne flute and clinking it against hers"
+   → one hand, anchored at the bottom — clearly the player's own viewmodel.
+✅ GOOD: "both of the player's forearms entering from frame bottom, hands wrapping
+        around her waist as he leans in"
+   → two hands, but both anchored from BELOW — still reads as the player.
 
 ## ⛔ The player is NEVER a SUBJECT of the frame
 Even if the narrator's `shot_intent` invites one of these — REJECT IT and re-frame as POV:
@@ -97,8 +115,8 @@ across the dunes / cityscape / room) — not the player's body.
 POV-correct alternatives when the narrator wants atmosphere:
 - "POV first-person looking across the vast Tatooine dunes at night, twin moons low on
    the horizon..." → camera is the player's eyes, scene is the landscape.
-- "POV first-person, hands resting on knees at frame bottom edge, looking out over
-   the water..." → only forearms/hands at edges, never face/back.
+- "POV first-person, hands resting on knees at frame bottom, looking out over
+   the water..." → forearms/hands anchored from below, never from the sides.
 
 # Structure — 4 layers (Camera Director Formula)
 Layer 1 — Subject & action: shot type + person (age, ethnicity, body, face) + clothing

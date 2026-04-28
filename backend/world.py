@@ -106,12 +106,27 @@ _NEO_2100_LOCATIONS = [
     Location("work", "Studio de design augmenté", "work", "Espace de travail VR/AR"),
 ]
 
-_DEFAULT_LOCATIONS = _PARIS_2026_LOCATIONS  # fallback for unknown settings
+# Setting-agnostic placeholder locations used when Grok world-generation fails
+# AND the setting is "custom" / unknown. Better than dumping a bespoke-prompt
+# user into a Parisian apartment they didn't ask for. Names are intentionally
+# generic so the narrator can re-skin them via the custom_setting_text in the
+# system prompt without contradiction.
+_GENERIC_LOCATIONS = [
+    Location("home", "Your place", "home", "The room or space the player retreats to"),
+    Location("hub", "The main gathering area", "other", "Where most of the cast tends to congregate"),
+    Location("private_room", "A quieter side room", "other", "Calmer spot, used for private conversations"),
+    Location("outside", "Outside / grounds", "park", "Open-air space adjacent to the main setting"),
+    Location("hidden_corner", "A discreet corner", "other", "Off-the-beaten-path spot, ideal for secrets"),
+    Location("threshold", "Entry / threshold", "other", "Where people arrive and leave"),
+]
+
+_DEFAULT_LOCATIONS = _GENERIC_LOCATIONS  # fallback for unknown / custom settings
 
 LOCATION_CATALOG: dict[str, list[Location]] = {
     "paris_2026": _PARIS_2026_LOCATIONS,
     "paris_1800": _PARIS_1800_LOCATIONS,
     "neo_2100": _NEO_2100_LOCATIONS,
+    "custom": _GENERIC_LOCATIONS,  # explicit so custom-setting users never get Paris
 }
 
 
