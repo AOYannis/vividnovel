@@ -153,13 +153,16 @@ async def get_actors():
 
 @app.get("/api/settings")
 async def get_settings():
-    """Return available story settings."""
+    """Return available story settings. `teaser` (when present) is the short
+    one-line preview the setup card should show; `description` is the full
+    rich brief that flows into Grok and is too long for a card."""
     settings = []
     for sid, s in SETTINGS.items():
         settings.append({
             "id": sid,
             "label": s["label"],
             "description": s["description"],
+            "teaser": s.get("teaser", ""),
         })
     return {"settings": settings}
 
@@ -308,9 +311,15 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
                 ("custom", {"description": req.custom_character_desc, "prompt_prefix": req.custom_character_desc})
             )
         setting_label = SETTINGS.get(req.setting, {}).get("label") or req.custom_setting or req.setting
+        # Preset settings carry a rich `description` that downstream Grok calls
+        # (location set, cast schedules, map prompt) need to see in full —
+        # otherwise they only get the bare label and produce generic results.
+        # User-typed `custom_setting` always wins when both are present.
+        preset_text = SETTINGS.get(req.setting, {}).get("description", "") or ""
+        effective_setting_text = req.custom_setting or preset_text
         try:
             locs, states = await generate_world_and_agents(
-                grok_client, setting_label, req.custom_setting or "", cast_tuples,
+                grok_client, setting_label, effective_setting_text, cast_tuples,
                 grok_model=session.grok_model,
                 language=session.language,
             )
@@ -336,6 +345,14 @@ async def start_game(req: StartGameRequest, user: dict = Depends(get_current_use
             print(f"[slice] generation failed entirely: {e}; defaulting to empty world")
             session.world = default_world_for_setting(req.setting)
             session.character_states = {}
+        # Fire the map background generation in the background — the user can
+        # start playing immediately; the map URL lands on the WorldState a few
+        # seconds later and is picked up the next time MapModal calls fetchWorld.
+        if session.world and session.world.locations:
+            import asyncio as _asyncio
+            _asyncio.create_task(_generate_map_background(
+                session, setting_label, effective_setting_text
+            ))
     sessions[session_id] = session
 
     # Persist to DB (fire-and-forget)
@@ -409,6 +426,45 @@ async def go_to_location(req: GoToLocationRequest, user: dict = Depends(get_curr
     session.consistency.props = []
     db.fire_and_forget(db.save_session(session))
     return _build_world_payload(session)
+
+
+async def _generate_map_background(session, setting_label: str, custom_setting_text: str) -> None:
+    """Background task: craft a map prompt via Grok, render it via Z-Image, write
+    the URL onto session.world. Best-effort — silent skip on any failure so the
+    game remains playable without a map background."""
+    if runware_client is None or session.world is None or not session.world.locations:
+        return
+    try:
+        from agent import craft_map_image_prompt
+        from story_engine import StoryEngine
+        prompt = await craft_map_image_prompt(
+            grok_client,
+            setting_label=setting_label,
+            custom_setting_text=custom_setting_text,
+            locations=session.world.locations,
+            grok_model=session.grok_model,
+        )
+        if not prompt:
+            print("[map_bg] empty prompt — skipping")
+            return
+        engine = StoryEngine(grok_client, runware_client)
+        # No character LoRAs, no style LoRAs — pure scenic illustration.
+        result = await engine._generate_image(
+            {
+                "image_prompt": prompt,
+                "actors_present": [],
+                "style_moods": ["neutral"],
+            },
+            {"actors": []},
+            None, None,
+        )
+        url = result.get("url") if isinstance(result, dict) else None
+        if url:
+            session.world.map_background_url = url
+            db.fire_and_forget(db.save_session(session))
+            print(f"[map_bg] generated: {url[:80]}...")
+    except Exception as e:
+        print(f"[map_bg] generation failed: {e}")
 
 
 def _build_world_payload(session) -> dict:

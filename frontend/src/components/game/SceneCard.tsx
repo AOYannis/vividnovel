@@ -143,9 +143,10 @@ export default function SceneCard({
   const [chatLoading, setChatLoading] = useState(false)
   const [videoMuted, setVideoMuted] = useState(true)
   // Page-level singleton TTS audio. The hook owns the <audio> element + the
-  // first-gesture warmup. `isWarmed` doubles as the "audio is unlocked" signal
-  // for the video unmute logic below — same role the old `audioReady` state had.
-  const { playScene: playSceneAudio, pauseScene: pauseSceneAudio, isWarmed: audioReady } = useSceneAudio()
+  // first-gesture warmup. The video-unmute effect below no longer gates on
+  // `isWarmed` — it tries unmuted and falls back to muted on rejection, which
+  // gives desktop autoplay-with-sound back without breaking mobile.
+  const { playScene: playSceneAudio, pauseScene: pauseSceneAudio } = useSceneAudio()
   const [videoRegenLoading, setVideoRegenLoading] = useState(false)
   const [showVideoPrompt, setShowVideoPrompt] = useState(false)
   const [videoPromptEdit, setVideoPromptEdit] = useState('')
@@ -203,11 +204,12 @@ export default function SceneCard({
   // - Videos play muted by default (autoPlay + onLoadedData fallback)
   // - Tap to unmute (user gesture required on mobile)
   // - Scroll away → mute
-  // - After first tap unlocks audio globally, subsequent scenes auto-play with sound
-
-  // When user scrolls away → mute. When scrolling TO a scene after audio unlock → unmute.
-  // On mobile, the unmute-from-effect only works AFTER a user gesture has unlocked audio
-  // on the same video element. We use play() to re-engage after unmuting.
+  // - On scroll-in we always TRY unmuted; the catch falls back to muted on
+  //   browsers that reject (mobile pre-gesture). Don't gate on audioReady —
+  //   on desktop the document already has user-activation from the click that
+  //   navigated to the game, but our hook's gesture listeners install too late
+  //   to catch it, so audioReady can be false even though .play() unmuted will
+  //   succeed. Trying-and-falling-back restores the pre-refactor behaviour.
   useEffect(() => {
     const v = sceneVideoRef.current
     if (!v || !image.sceneVideoUrl) return
@@ -216,21 +218,20 @@ export default function SceneCard({
       // Scrolled away → mute (always works)
       v.muted = true
       setVideoMuted(true)
-    } else if (isViewing && audioReady) {
-      // Scrolled TO this scene and audio was previously unlocked
+    } else {
+      // Scrolled TO this scene → try unmuted, fall back to muted on rejection.
       soundPlayCount.current = 0
       v.muted = false
       v.currentTime = 0
       setVideoMuted(false)
-      // play() needed in case the video was paused or stalled
       v.play().catch(() => {
-        // If unmuted play fails (mobile first-gesture restriction), fall back to muted
+        // Mobile / no user gesture yet → mute and re-play silently.
         v.muted = true
         setVideoMuted(true)
         v.play().catch(() => {})
       })
     }
-  }, [isViewing, audioReady, image.sceneVideoUrl])
+  }, [isViewing, image.sceneVideoUrl])
 
   // After one full loop with sound, mute and keep looping silently
   useEffect(() => {

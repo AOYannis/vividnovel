@@ -819,20 +819,23 @@ export default function SetupPage() {
           <div className="fade-in space-y-4">
             <h2 className="text-xl font-semibold text-neutral-200 mb-4">{t('setup.step2.title')}</h2>
             <div className="space-y-3">
-              {settings.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => { store.setSetting(s.id); setCustomSetting('') }}
-                  className={`w-full text-left p-4 rounded-xl border transition-all min-h-[56px] ${
-                    store.setting === s.id && !customSetting
-                      ? 'border-indigo-500 bg-indigo-950/40'
-                      : 'border-neutral-800 bg-neutral-900 hover:border-neutral-700'
-                  }`}
-                >
-                  <div className="font-semibold text-neutral-100">{t(`setting.${s.id}.label`) !== `setting.${s.id}.label` ? t(`setting.${s.id}.label`) : s.label}</div>
-                  <div className="text-sm text-neutral-400 mt-1">{t(`setting.${s.id}.desc`) !== `setting.${s.id}.desc` ? t(`setting.${s.id}.desc`) : s.description}</div>
-                </button>
-              ))}
+              {settings.map((s) => {
+                const previewText = s.teaser || s.description
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => { store.setSetting(s.id); setCustomSetting('') }}
+                    className={`w-full text-left p-4 rounded-xl border transition-all min-h-[56px] ${
+                      store.setting === s.id && !customSetting
+                        ? 'border-indigo-500 bg-indigo-950/40'
+                        : 'border-neutral-800 bg-neutral-900 hover:border-neutral-700'
+                    }`}
+                  >
+                    <div className="font-semibold text-neutral-100">{t(`setting.${s.id}.label`) !== `setting.${s.id}.label` ? t(`setting.${s.id}.label`) : s.label}</div>
+                    <div className="text-sm text-neutral-400 mt-1 line-clamp-3">{t(`setting.${s.id}.desc`) !== `setting.${s.id}.desc` ? t(`setting.${s.id}.desc`) : previewText}</div>
+                  </button>
+                )
+              })}
               {/* Custom setting */}
               <div
                 className={`w-full text-left p-4 rounded-xl border transition-all ${

@@ -57,14 +57,11 @@ Pick ONE wrapping tag per sentence/clause — never stack them.
 
 NARRATOR PROSE (context narration for romance/NSFW stories):
   • Default tone: warm, velvety, intimate, and seductive — like a lover whispering the story directly into the listener’s ear.
-  • Use ONE of <soft> or <whisper> per sentence — the one that fits best.
+  • Use ONE of <soft>text </soft> or much more rarely <whisper>text </whisper> per sentence — the one that fits best.
     Vary across sentences; never stack the two on the same clause.
   • For intimate or erotic moments: prefer <whisper>...</whisper> alone for
     the most confidential lines, OR <soft>...</soft> alone for the rest.
-  • Breath sounds are allowed but SPARINGLY and only at natural emotional peaks:
-    → [inhale] or [breath] when tension builds
-    → [exhale] or [sigh] after a particularly charged moment
-    → NEVER put [breath], [exhale], or [sigh] at the end of every sentence.
+  • Don't use breathing tags, like [breath], [exhale], or [sigh], let's keep it simple and natural. 
   • Use [pause] or [long-pause] for delicious tension between actions.
 
 DIALOGUES (text inside quotes):

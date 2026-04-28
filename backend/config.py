@@ -675,4 +675,130 @@ SETTINGS = {
         "description": "Mégalopole futuriste — néons, hologrammes, clubs cyberpunk",
         "era": "futuriste",
     },
+    # ─── Huis-clos / mystères ──────────────────────────────────────────────
+    # Rich, hand-written briefs. The full `description` text is what flows
+    # downstream to Grok (location generation, cast schedules, map prompt) —
+    # so the prose is intentionally dense and specific. The short `teaser`
+    # is what the player sees in the setup card.
+    "mystery_cornouailles": {
+        "label": "Le manoir des Cornouailles",
+        "teaser": "Manoir victorien isolé par la tempête. Patriarche assassiné dans la bibliothèque verrouillée.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Falaises battues par la tempête, vieille demeure victorienne perdue sur la côte anglaise. "
+            "Le patriarche Lord Ashworth a réuni sa famille pour annoncer son nouveau testament. "
+            "Au matin, on le retrouve dans la bibliothèque verrouillée de l'intérieur, une coupe de "
+            "porto renversée à ses pieds. La route est inondée, le téléphone coupé. Suspects : la "
+            "jeune épouse de 30 ans sa cadette, le fils héritier ruiné par les paris, la fille adoptée "
+            "écartée du testament, le majordome qui sait trop de choses, le médecin de famille "
+            "étrangement nerveux, et la nièce écrivaine qui prenait des notes pendant le dîner."
+        ),
+    },
+    "mystery_transsiberien": {
+        "label": "Train de nuit Moscou-Vladivostok",
+        "teaser": "Transsibérien, sept jours hors du monde. Oligarque étranglé avec sa propre cravate Hermès.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Compartiment de luxe du Transsibérien, sept jours de voyage, taïga gelée à perte de vue. "
+            "Au troisième matin, l'oligarque Volkov est retrouvé mort dans sa cabine, étranglé avec "
+            "sa propre cravate Hermès. Le prochain arrêt est dans 14 heures. Suspects : son garde "
+            "du corps qui dormait juste à côté, sa maîtresse française, un journaliste d'investigation "
+            "qui le suivait, un diplomate chinois aux bagages diplomatiques inviolables, une vieille "
+            "dame qui joue aux échecs toute seule, et le serveur du wagon-restaurant qui a versé son thé."
+        ),
+    },
+    "mystery_arcs": {
+        "label": "Chalet aux Arcs, tempête de neige",
+        "teaser": "Réunion HEC vingt ans après. Fortune fracassée au pied de l'escalier. Tempête, télécabines coupées.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Réunion d'anciens amis de prépa HEC, vingt ans après. Sept personnes, un chalet de luxe, "
+            "du champagne, des secrets. La tempête a coupé l'accès aux pistes et aux télécabines. Au "
+            "matin, Alexandre — devenu le plus riche du groupe — gît au pied de l'escalier, le crâne "
+            "fracassé. Chute accidentelle ou meurtre ? Suspects : l'ex qu'il a quittée pour épouser sa "
+            "meilleure amie, l'associé qu'il a évincé, le copain devenu raté qui lui empruntait de "
+            "l'argent, la femme actuelle qui a vu les SMS, le frère cadet jaloux, et l'ami d'enfance "
+            "médecin qui a « constaté » la mort un peu vite."
+        ),
+    },
+    "mystery_egee": {
+        "label": "Yacht en mer Égée",
+        "teaser": "Le Calliope croise les Cyclades. Magnat introuvable, peignoir abandonné sur le pont arrière.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Le Calliope, voilier de 50 mètres, croisière privée entre les Cyclades. À bord : un "
+            "magnat de la presse grec, sa famille recomposée, quelques invités triés sur le volet. "
+            "Au matin, le magnat est introuvable dans sa cabine. On retrouve son peignoir sur le pont "
+            "arrière et des traces de sang sur le bastingage. Le capitaine refuse de regagner le port "
+            "avant l'enquête. Suspects : la nouvelle épouse, son fils du premier mariage déshérité, "
+            "le rédacteur en chef qu'il s'apprêtait à virer, l'avocate de la famille qui connaît tous "
+            "les dossiers, un romancier invité qui semblait fasciné par lui, et l'équipage philippin "
+            "que personne n'interroge."
+        ),
+    },
+    "mystery_pensionnat": {
+        "label": "Pensionnat suisse, week-end de retrouvailles",
+        "teaser": "Internat huppé de Lausanne, 25 ans après. Prof pendue dans la chapelle. Le scandale de 99 remonte.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Un internat huppé près de Lausanne ouvre ses portes pour les 25 ans de la promo. Une "
+            "douzaine d'anciens élèves, quelques profs encore en poste, le directeur émérite. Au "
+            "petit déjeuner, on découvre Mme Berger, la prof de littérature, pendue dans la chapelle. "
+            "Mais le nœud ne correspond pas à un suicide. Tout le monde se souvient du « scandale de "
+            "99 » que personne n'a jamais éclairci. Suspects : ceux qui étaient impliqués dans "
+            "l'affaire, et ceux qui ont fait semblant de ne rien voir."
+        ),
+    },
+    "mystery_bordeaux": {
+        "label": "Vendanges au château bordelais",
+        "teaser": "Domaine viticole prestigieux, dégustation des nouveaux millésimes. Œnologue noyé dans une cuve.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Domaine viticole prestigieux pendant les vendanges. Le propriétaire, œnologue mondialement "
+            "reconnu, accueille critiques, acheteurs et famille pour la dégustation des nouveaux "
+            "millésimes. Au matin du second jour, on le retrouve noyé dans une cuve de fermentation. "
+            "Suspects : ses deux fils en guerre pour la succession, le maître de chai qui rêvait du "
+            "domaine, un critique américain à la plume assassine, un acheteur chinois éconduit, sa "
+            "fille végane et anti-alcool, et la jeune œnologue qu'il venait d'embaucher."
+        ),
+    },
+    "mystery_mont_blanc": {
+        "label": "Refuge de haute montagne, Mont-Blanc",
+        "teaser": "Tempête imprévue, huit alpinistes coincés à 3800m. Guide chef d'expédition, piolet en pleine poitrine.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Tempête imprévue, huit alpinistes coincés dans un refuge à 3800 mètres. Vivres pour trois "
+            "jours, hélico impossible avant 48 heures. La deuxième nuit, le guide chef d'expédition "
+            "est retrouvé dans son sac de couchage, un piolet planté dans la poitrine. La porte du "
+            "refuge n'a pas été ouverte. Suspects : tous ceux qui dormaient dans la pièce commune, "
+            "plus le gardien du refuge qui avait sa chambre à part."
+        ),
+    },
+    "mystery_theatre": {
+        "label": "Théâtre parisien, première annulée",
+        "teaser": "Soir de générale. Première actrice empoisonnée au troisième acte. Portes fermées, troupe retenue.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Soir de générale dans un grand théâtre parisien. La première actrice s'effondre au "
+            "troisième acte, empoisonnée. Les portes sont fermées, le public et la troupe sont retenus "
+            "pour interrogatoire jusqu'au matin. Suspects : le metteur en scène qui couchait avec elle, "
+            "le mari producteur qui finance le spectacle, l'actrice doublure qui prend sa place ce "
+            "soir, le critique du Monde au premier rang qui l'avait détruite l'an dernier, le régisseur "
+            "amoureux transi, et l'auteur qui voulait la virer du rôle."
+        ),
+    },
+    "mystery_glenan": {
+        "label": "Île privée des Glénan",
+        "teaser": "Île de la tech, mer démontée, pas de réseau. Hôte évanoui, téléphone fracassé sur les rochers.",
+        "era": "huis-clos contemporain",
+        "description": (
+            "Un milliardaire de la tech a invité une dizaine d'invités sur son île privée pour fêter "
+            "le rachat de sa boîte. Vedette en panne, mer démontée, pas de réseau. Au réveil, l'hôte "
+            "n'est nulle part. On retrouve son téléphone fracassé sur les rochers et une lettre de "
+            "démission qu'il n'avait jamais envoyée. Suspects : son cofondateur qu'il avait poussé "
+            "dehors, sa femme qui demandait le divorce, son DAF accusé d'avoir maquillé les comptes, "
+            "une journaliste tech qui préparait un papier au vitriol, son thérapeute personnel, et "
+            "son chef cuisinier qui connaît tous les invités depuis dix ans."
+        ),
+    },
 }

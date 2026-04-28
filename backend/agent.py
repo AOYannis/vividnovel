@@ -382,6 +382,94 @@ Output only the JSON, no commentary."""
     return locations, states
 
 
+async def craft_map_image_prompt(
+    grok_client,
+    *,
+    setting_label: str,
+    custom_setting_text: str,
+    locations: list[Location],
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+) -> str:
+    """Craft ONE Z-Image Turbo prompt that paints the world map as a stylised
+    illustration — vignettes/icons of each location laid out across the canvas.
+    The visual style adapts to the setting era (eg parchment for ancient, neon
+    schematic for cyberpunk, watercolour travel-poster or subway map etc. for contemporary, engraved
+    atlas for Belle Époque, etc.).
+
+    Critical: NO TEXT, NO LABELS — Z-Image cannot render text reliably. Locations
+    are recognised purely by their architectural silhouette and surrounding
+    details, not by written names.
+
+    Returns the prompt string, or empty string on failure (caller should skip
+    map background and fall back to plain modal). Fires ONCE per game at world creation.
+    """
+    if not locations:
+        return ""
+    locs_for_prompt = "\n".join(
+        f"  - {loc.name} ({loc.type}): {(loc.description or '').strip()[:140]}"
+        for loc in locations
+    )
+    setting_blurb = (custom_setting_text or setting_label or "").strip()[:400]
+    sys_msg = (
+        "You craft ONE Z-Image Turbo prompt that illustrates a fictional MAP of "
+        "the world for a slice-of-life story. Examples below are just for inspiration, do not take them as they are but just for ideas, fit to the actual context of the story and provided locations\n\n"
+        "FORMAT: a stylised cartographic ILLUSTRATION (top-down or 3/4 isometric "
+        "bird's-eye view), NOT a literal modern street map. Each named location "
+        "appears as a small architectural vignette or symbolic icon arranged "
+        "across the canvas, connected by paths/roads/waterways/transit lines "
+        "appropriate to the setting.\n\n"
+        "STYLE — pick a visual treatment that fits the era and tone:\n"
+        "  - Ancient/historical/fantasy → weathered parchment with hand-drawn "
+        "ink, sepia tones, compass rose, decorative cartouches\n"
+        "  - Cyberpunk/futurist → neon-lit isometric schematic, holographic "
+        "grid, glowing data-lines, dark base palette\n"
+        "  - Modern cosy/contemporary → soft watercolour travel-poster style, "
+        "warm pastels, hand-painted feel\n"
+        "  - Belle Époque / 1800s → engraved atlas plate, copperplate hatching, "
+        "ivory paper, ornate border\n"
+        "  - Post-apocalyptic → torn cloth or scrap-metal etched map, muted, "
+        "weathered\n"
+        "Pick whichever fits BEST and commit to it.\n\n"
+        "CRITICAL RULES:\n"
+        "  - NO TEXT. NO WORDS. NO LETTERS. NO LABELS. NO SIGNAGE. NO NUMBERS. "
+        "Z-Image cannot render text reliably and any attempt produces gibberish.\n"
+        "  - NO PEOPLE, NO CHARACTERS, NO PORTRAITS — purely environmental.\n"
+        "  - Each location is recognisable by its silhouette and surroundings "
+        "only (a café = small awning + outdoor tables; a club = neon halo + "
+        "queue rope; a park = trees + paths; a home = small townhouse vignette).\n\n"
+        "INCLUDE: rich atmospheric detail, era-appropriate terrain and "
+        "landmarks between the locations, soft vignetting, painterly texture, "
+        "high-quality illustration craft.\n\n"
+        "OUTPUT: ONLY the Z-Image prompt, ~80-160 words, no preamble, no "
+        "labels, no quotes, no commentary."
+    )
+    user_msg = (
+        f"Setting: {setting_blurb}\n\n"
+        f"Locations to depict (as small architectural vignettes, NO labels):\n"
+        f"{locs_for_prompt}\n\n"
+        f"Output the Z-Image prompt:"
+    )
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=grok_model,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.7,
+            max_tokens=500,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        # Belt and suspenders: hard-suffix the no-text constraint so even if Grok
+        # forgets, Z-Image gets the strongest possible negative signal.
+        if text and "no text" not in text.lower():
+            text = text + ", no text, no words, no letters, no labels, no signage"
+        return text
+    except Exception as e:
+        print(f"[agent] craft_map_image_prompt failed: {e}")
+        return ""
+
+
 # Only EVENING slots get deconflicted. Mornings/afternoons (work) and nights
 # (home) are expected to have multiple cast members at the same location —
 # everyone goes to work, everyone goes home to sleep. Evenings are when the

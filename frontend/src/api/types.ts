@@ -10,6 +10,10 @@ export interface Setting {
   id: string
   label: string
   description: string
+  /** Short one-line preview for the setup card. When present, the card shows
+   *  this instead of the (much longer) `description`, which is the rich brief
+   *  Grok consumes downstream. */
+  teaser?: string
 }
 
 export interface PlayerProfile {
@@ -151,6 +155,7 @@ export interface WorldState {
   locations: Location[]
   current_location: string
   history: WorldHistoryEntry[]
+  map_background_url?: string
 }
 
 export interface RecentEvent {

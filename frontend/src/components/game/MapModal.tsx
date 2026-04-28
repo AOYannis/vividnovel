@@ -65,6 +65,9 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
   const setWorldPayload = useGameStore((s) => s.setWorldPayload)
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState('')
+  // Card fade-in: open → map shows immediately → ~280ms later the card itself
+  // fades in. Reset to false on close so re-opens replay the animation.
+  const [cardVisible, setCardVisible] = useState(false)
 
   // Refresh world payload when modal opens — picks up any new whereabouts the
   // post-sequence extractor added since the user last looked.
@@ -73,6 +76,14 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
       fetchWorld(sessionId).then(setWorldPayload).catch(() => {})
     }
   }, [open, sessionId])
+
+  useEffect(() => {
+    if (!open) { setCardVisible(false); return }
+    // Tiny delay so the user perceives "map first, then card" — long enough
+    // for the eye to register the illustration, short enough not to feel slow.
+    const id = window.setTimeout(() => setCardVisible(true), 280)
+    return () => window.clearTimeout(id)
+  }, [open])
 
   if (!open) return null
   if (!world || !sessionId) {
@@ -119,14 +130,35 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
     .sort(compareWhereabouts)
     .slice(0, 8)
 
+  const mapBgUrl = world.map_background_url || ''
+
   return (
-    <div className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden" onClick={onClose}>
+      {/* Full-viewport map background — replaces the usual black overlay. */}
+      {mapBgUrl ? (
+        <>
+          <img
+            src={mapBgUrl}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          {/* Darkening scrim over the map for card legibility + click-through-to-close */}
+          <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
+        </>
+      ) : (
+        <div className="absolute inset-0 bg-black/85 backdrop-blur-sm" />
+      )}
       <div
-        className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        className={`relative z-10 bg-neutral-950/85 backdrop-blur-md border border-neutral-800 rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden flex transition-all duration-500 ease-out ${
+          cardVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Scrollable content */}
+        <div className="relative z-10 w-full overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 bg-neutral-950/95 backdrop-blur-sm border-b border-neutral-800 px-4 py-3 flex items-center justify-between">
+        <div className="sticky top-0 bg-neutral-950/85 backdrop-blur-md border-b border-neutral-800 px-4 py-3 flex items-center justify-between">
           <div>
             <div className="text-xs text-neutral-500 uppercase tracking-wider">{t('map.title')}</div>
             <div className="text-sm text-neutral-200 font-mono">
@@ -297,6 +329,7 @@ export default function MapModal({ open, onClose, onMoved }: MapModalProps) {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   )

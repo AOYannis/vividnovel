@@ -49,6 +49,7 @@ class WorldState:
     locations: list[Location] = field(default_factory=list)
     current_location: str = ""                # location.id; "" before first move
     history: list[dict] = field(default_factory=list)  # last N location-slot visits
+    map_background_url: str = ""              # one-shot Z-Image illustration of the world map
 
     def as_dict(self) -> dict:
         return {
@@ -57,6 +58,7 @@ class WorldState:
             "locations": [asdict(loc) for loc in self.locations],
             "current_location": self.current_location,
             "history": list(self.history)[-20:],  # cap at 20 for prompt size
+            "map_background_url": self.map_background_url,
         }
 
     @classmethod
@@ -67,6 +69,7 @@ class WorldState:
             locations=[Location(**loc) for loc in data.get("locations", [])],
             current_location=str(data.get("current_location", "")),
             history=list(data.get("history", [])),
+            map_background_url=str(data.get("map_background_url", "")),
         )
 
     def location_by_id(self, loc_id: str) -> Location | None:

@@ -430,30 +430,56 @@ async def extract_clothing(
 
     The returned phrase is the source of truth for `consistency.clothing[code]`.
     It must be specific enough that Z-Image Turbo cannot reasonably re-interpret
-    it across renders ("revealing pirate silks" → bad; "off-shoulder crimson
-    silk corset with gold-thread embroidery, brown leather belt with brass
-    buckle, asymmetric knee-length skirt slit on the right thigh, knee-high tan
-    boots" → good).
+    it across renders. The extractor is instructed to COMMIT to plausible
+    concrete specifics (colour, fabric, hardware) when the source prompt is
+    vague — passing vagueness through guarantees visual drift.
 
-    Returns a short, comma-separated phrase (~30-80 words) or empty string on
-    failure. Cost: ~80 input + ~80 output tokens per call (~$0.00005 each on
+    Returns a comma-separated phrase (~40-110 words) or empty string on
+    failure. Cost: ~150 input + ~150 output tokens per call (~$0.00008 each on
     Grok 4.1 Fast). Fires once per actor on first sighting, plus once whenever
     the LLM clothing-change classifier flags an actor as having changed.
     """
     if not image_prompt or not codename:
         return ""
     sys_msg = (
-        "You extract the CLOTHING of ONE specific character from a Z-Image "
-        "Turbo prompt. Output a single dense, comma-separated phrase that can "
-        "be reused VERBATIM in future prompts to lock the outfit so the image "
-        "model renders the SAME garments every time. INCLUDE for each visible "
-        "garment: cut/silhouette, colour, fabric/material, accessories (belts, "
-        "jewellery, footwear), and visible state (open, torn, ruffled, soaked, "
-        "etc.) — be SPECIFIC enough that no creative latitude is left. EXCLUDE: "
-        "head/face/hair, skin, body shape, pose, action, location, lighting, "
-        "camera, mood, anything else. If the prompt does not clearly describe "
-        "an outfit for this character, output an empty string. Output ONLY "
-        "the phrase — no labels, no quotes, no commentary."
+        "You extract the OUTFIT of ONE specific character from a Z-Image Turbo "
+        "prompt and produce a dense, factual lock that future prompts will "
+        "reuse VERBATIM to keep the same garments rendering consistently across "
+        "scenes.\n\n"
+        "REQUIREMENTS — every garment AND every accessory MUST specify:\n"
+        "  - exact garment shape/cut (sheath dress, A-line skirt, fitted "
+        "blazer, halter top — not 'dress' or 'top')\n"
+        "  - colour NAMED concretely (cobalt blue, charcoal grey, ivory cream, "
+        "oxblood burgundy — not 'blue' or 'dark')\n"
+        "  - fabric/material (matte cotton, polished silk-satin, brushed "
+        "leather, crinkled linen, ribbed knit, distressed denim — never omit)\n"
+        "  - closure/construction details when relevant (zip-back, "
+        "button-front, lace-up, asymmetric hem, drop waist, princess seams)\n"
+        "  - hardware and accessories piece by piece: jewellery with "
+        "metal+colour (brushed gold hoops, blackened-silver chain pendant), "
+        "footwear with material+colour, belts/bags/eyewear with material+colour\n"
+        "  - visible state if explicit in source (slipped strap, "
+        "half-unbuttoned, drenched, torn at hem)\n\n"
+        "When the source prompt is VAGUE ('revealing pirate silks', 'sleek "
+        "corporate mini-dress', 'casual outfit', 'elegant gown'), DO NOT echo "
+        "the vagueness. Commit to plausible concrete specifics consistent with "
+        "the character and setting visible in the prompt. The lock is the "
+        "source of truth — a vague lock guarantees visual drift across scenes.\n\n"
+        "EXCLUDE: head, face, hair, skin, body shape, pose, action, location, "
+        "lighting, camera, mood.\n\n"
+        "OUTPUT: a single comma-separated phrase, ~40-110 words, no labels, "
+        "no quotes, no commentary. If no outfit is described AND the codename "
+        "does not appear, output an empty string.\n\n"
+        "GOOD: 'off-shoulder crimson silk-satin corset top with black lace "
+        "trim along bust line, fitted brushed-brown-leather corset belt with "
+        "brass eyelets, asymmetric tea-length black cotton skirt slit on right "
+        "thigh, knee-high tan suede boots with two brass-buckle straps, "
+        "hammered-bronze hoop earrings, thin braided-leather choker'\n"
+        "BAD: 'revealing pirate silks' (no colour, no material, no specifics)\n"
+        "BAD: 'sleek corporate mini-dress, chrome jewelry' (vague garment, no "
+        "colour, no fabric, no piece-by-piece jewellery)\n"
+        "BAD: 'blue dress with jewellery' (no shade, no fabric, no shape, "
+        "no jewellery type)"
     )
     user_msg = (
         f"Character codename: `{codename}`\n\n"
@@ -467,8 +493,8 @@ async def extract_clothing(
                 {"role": "system", "content": sys_msg},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.2,
-            max_tokens=200,
+            temperature=0.3,
+            max_tokens=320,
         )
         text = (resp.choices[0].message.content or "").strip()
         if text.startswith(("'", '"')) and text.endswith(("'", '"')) and len(text) > 2:

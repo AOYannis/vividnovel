@@ -139,7 +139,18 @@ export function useSceneAudio(): SceneAudioApi {
     }
     currentSceneIndex = sceneIndex
     el.muted = false
-    el.play().catch((err: unknown) => {
+    el.play().then(() => {
+      // A successful unmuted play proves the document is audio-unlocked, even
+      // if the silent-WAV warmup never fired (e.g. on desktop, where the only
+      // gesture the user gave was the click that landed them on the game page,
+      // BEFORE this hook's listeners were installed). Notifying subscribers
+      // here lets gates like SceneCard's video-unmute effect light up too,
+      // restoring the pre-singleton-refactor desktop autoplay behaviour.
+      if (!isWarmed) {
+        isWarmed = true
+        warmedListeners.forEach((fn) => fn())
+      }
+    }).catch((err: unknown) => {
       // Swallow autoplay rejections — the next gesture will warm us. Avoid
       // muting silently (the bug we used to have); the user wants narration,
       // not silent fallback.
