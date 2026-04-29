@@ -891,15 +891,19 @@ def _build_slice_intro_prompt(
         "se rappelle des LIEUX qu'il fréquente dans sa vie.\n"
         "\n"
         "### Les 8 scènes — un tour du quotidien\n"
-        "Chaque scène focalise sur UN OBJET ou UN DÉTAIL spécifique de ce lieu :\n"
-        "- Un objet posé, une carte sur le frigo, une notification qui s'allume, un livre ouvert,\n"
-        "  un vêtement laissé sur une chaise, le reflet dans la vitre, un ticket dans la poche…\n"
-        "- L'objet ÉVOQUE un lieu de la vie du joueur (sans le nommer techniquement) — par\n"
-        "  l'association libre, le souvenir, la pensée fugace.\n"
-        "- Reste ATMOSPHÉRIQUE : pas d'événement dramatique, pas d'arrivée surprise, pas de\n"
-        "  coup de fil avec un personnage. C'est une scène de retour au calme.\n"
-        "- Varie les types d'images : un plan large du lieu, des gros plans d'objets, "
-        "  des détails de matière.\n"
+        "Chaque scène focalise sur UN détail saillant de CE lieu précis : un objet, une texture, "
+        "un son, une lumière, un geste, un fragment d'écrit, une trace, un reflet, une odeur "
+        "perçue à travers un objet — ce qui appartient PLAUSIBLEMENT à CE lieu et à CE personnage "
+        "spécifiquement (son âge, son métier, son époque, le cadre).\n"
+        "- Le détail ÉVOQUE un autre lieu de la vie du joueur (sans le nommer techniquement) — "
+        "par l'association libre, le souvenir, la pensée fugace.\n"
+        "- Tire les détails de CE QUI EXISTE CRÉDIBLEMENT dans CE lieu et la vie de CE joueur — "
+        "PAS d'objets génériques de catalogue, PAS de tropes attendus.\n"
+        "- Les 8 détails de la séquence doivent être DISTINCTS : pas deux objets de la même nature, "
+        "pas deux détails sensoriels du même registre. Varie aussi les ANGLES (vue large, gros plan, "
+        "texture, mouvement, son perçu).\n"
+        "- Reste ATMOSPHÉRIQUE : pas d'événement dramatique, pas d'arrivée surprise, pas de "
+        "coup de fil avec un personnage. C'est une scène de retour au calme.\n"
     )
 
     # World locations the props should hint at
@@ -914,13 +918,11 @@ def _build_slice_intro_prompt(
             "détails qui les ÉVOQUENT — l'esprit du joueur fait le lien.\n"
             "\n"
             + "\n".join(loc_lines) +
-            "\n\nExemples d'évocation crédibles (à adapter au cadre — laptop si moderne, lettre "
-            "si XIXᵉ, parchemin si pirate…) :\n"
-            "- `gym/yoga` → tapis roulé près de l'entrée, carte de membre, bouteille d'eau réutilisable\n"
-            "- `cafe/bar` → ticket de caisse froissé, pochette d'allumettes, sticker sur le frigo\n"
-            "- `work` → laptop entrouvert, badge sur la table, mug avec logo, dossier laissé\n"
-            "- `park/jardin` → chaussures de sport poussiéreuses, photo aimantée, branche séchée\n"
-            "- (cadre custom) → adapte les objets aux objets crédibles dans CE cadre"
+            "\n\nPour chaque lieu listé ci-dessus, invente un détail qui l'évoque CRÉDIBLEMENT, "
+            "adapté au CADRE (moderne / historique / fantastique / etc.) et au LIEU DE DÉPART où "
+            "se déroule la séquence. Chaque évocation doit naître de la combinaison spécifique "
+            "(lieu de départ × lieu évoqué × cadre × joueur) — surtout pas un objet par défaut "
+            "associé au type de lieu."
         )
 
     _push(sections, _section_language(lang_config, language))

@@ -352,31 +352,8 @@ Output only the JSON, no commentary."""
             description=str(raw_loc.get("description", ""))[:200],
         ))
 
-    # Recovery: Grok sometimes invents a contextual id ("guest_suite", "your_room")
-    # for the player's home instead of the literal "home" constant the engine
-    # depends on. If we have a location with type="home" but its id isn't "home",
-    # rename it. Or, last resort, force the first location to be home.
-    if not has_home and locations:
-        for i, loc in enumerate(locations):
-            if loc.type == "home":
-                locations[i] = Location(id="home", name=loc.name, type="home", description=loc.description)
-                seen_ids.discard(loc.id)
-                seen_ids.add("home")
-                has_home = True
-                print(f"[agent] recovered: renamed location id '{loc.id}' → 'home' (type=home was set)")
-                break
-    if not has_home and locations:
-        loc = locations[0]
-        locations[0] = Location(id="home", name=loc.name, type="home", description=loc.description)
-        seen_ids.discard(loc.id)
-        seen_ids.add("home")
-        has_home = True
-        print(f"[agent] recovered: forced first location ('{loc.id}', type='{loc.type}') → 'home' as last-resort anchor")
-
     if not locations or not has_home or len(locations) < 4:
         print(f"[agent] world generation returned invalid locations ({len(locations)}, has_home={has_home})")
-        # Surface what Grok returned so we can see WHY validation failed.
-        print(f"[agent] raw output (first 800 chars): {raw[:800]}")
         return [], {}
 
     valid_loc_ids = {loc.id for loc in locations}
@@ -447,7 +424,7 @@ async def craft_map_image_prompt(
     )
     setting_blurb = (custom_setting_text or setting_label or "").strip()[:400]
     sys_msg = (
-        "You craft ONE Z-Image Turbo prompt that illustrates a fictional MAP of "
+        "You craft ONE Z-Image Turbo prompt that is a photorealistic fictional MAP of "
         "the world for a slice-of-life story. Examples below are just for inspiration, do not take them as they are but just for ideas, fit to the actual context of the story and provided locations\n\n"
         "FORMAT: a stylised cartographic ILLUSTRATION (top-down or 3/4 isometric "
         "bird's-eye view), NOT a literal modern street map. Each named location "
