@@ -101,6 +101,35 @@ which looks like two strangers flanking the subject — not the player.
         around her waist as he leans in"
    → two hands, but both anchored from BELOW — still reads as the player.
 
+## ⚠️ Plural/shared body language → translate to singular POV
+The narrator's `scene_summary` and `pose_hint` will often use plural body language
+("bodies leaning closer", "they sit together", "side-by-side", "between them",
+"shared X", "their X") or describe shared/joint poses (sitting together, lying
+together, walking together). Z-Image reads these literally and renders TWO visible
+bodies — and since only ONE character LoRA is loaded, both bodies get the actor's
+face, producing a "twin character" rendering.
+
+ALWAYS translate plural / shared phrasing to singular POV. The actor performs the
+action; the player anchors the frame from below (hand on lap, arm beside her, etc.).
+Examples:
+
+❌ BAD : "seated side-by-side on the bench, bodies leaning closer"
+   → renders TWO visible bodies side by side (twin actor faces).
+✅ GOOD: "seated on the bench, the camera (player) seated next to her with player's
+        arm visible at frame bottom-right resting on his thigh, her body angled toward
+        the camera leaning slightly closer, her hand resting on his lap visible at
+        frame bottom"
+   → ONE visible body (hers) + player anchored at frame bottom.
+
+❌ BAD : "their hands intertwined on the vine, bodies imperceptibly closer"
+   → renders two bodies + a pair of hands belonging to neither.
+✅ GOOD: "her hand intertwined with the player's right hand at frame bottom resting
+        on a glowing vine, her body angled in close from the side"
+
+NEVER write "bodies", "they", "them", "their", "two of you", "side-by-side" as
+visible-frame descriptors. Only ONE body is ever in the frame — hers. The player's
+presence is implied by hands/forearms anchored from frame bottom.
+
 ## ⛔ The player is NEVER a SUBJECT of the frame
 Even if the narrator's `shot_intent` invites one of these — REJECT IT and re-frame as POV:
 - "from behind a figure", "the player from behind", "back turned", "silhouetted figure",
@@ -155,12 +184,15 @@ describes a change ("hair now wet", "face flushed", "fresh makeup", "tear streak
 in that case keep the locked baseline AND add the situational change on top.
 
 # Pose hint (optional)
-If a "Pose hint" block is provided, anchor the actor's body position/posture to it
-verbatim — be specific in the prompt about lying / kneeling / leaning / standing /
-seated, the exact body orientation, and any contact with surfaces or props (massage
-table, bar, headboard). The narrator only includes this when the pose isn't obvious
-from `scene_summary` alone. When no pose hint is given, infer the natural posture
-from the action.
+If a "Pose hint" block is provided, use it as INSPIRATION for the actor's body
+position/posture: lying / kneeling / leaning / standing / seated, body orientation,
+contact with surfaces or props (massage table, bar, headboard). Be specific in your
+prompt about the posture — but do NOT copy the hint VERBATIM if it contains plural
+body language ("bodies", "side-by-side", "together", "they", "them", "their") or
+shared-pose phrasings. Those describe the NARRATIVE moment between two characters;
+in the IMAGE only HER body is visible, the player is the camera. Translate per the
+POV rules (her body + player's hands/forearms at frame bottom).
+When no pose hint is given, infer the natural posture from the action.
 
 # Time of day & lighting — CRITICAL
 When a "Time of day" is provided (morning / afternoon / evening / night), the lighting
@@ -298,12 +330,19 @@ def _format_pose_block(pose_hint: str | None) -> str:
     """Optional pose / body-position guidance. Used when the scene needs an
     explicit posture (lying face-down on a massage table, kneeling on the
     sand, leaning against the bar) that scene_summary alone wouldn't make
-    obvious. Specialist should anchor the actor's body to this verbatim."""
+    obvious. Specialist should anchor the actor's body to this — but TRANSLATE
+    plural body language ('side-by-side', 'bodies', 'they') to POV singular
+    per the rules in SYSTEM_PROMPT, not copy verbatim."""
     if not pose_hint:
         return ""
     return (
-        "## Pose hint (anchor the actor's body to this — be specific in the prompt)\n"
-        f"{pose_hint.strip()}"
+        "## Pose hint (the body posture this scene calls for — INSPIRATION, not verbatim)\n"
+        f"{pose_hint.strip()}\n\n"
+        "⚠️ If this hint contains plural body language ('bodies', 'side-by-side', "
+        "'together', 'they', 'them', 'their'), DO NOT copy those words verbatim — "
+        "translate per the POV rules above (only HER body in frame, player anchored "
+        "via hands/forearms at frame bottom). The pose intent matters; the exact "
+        "phrasing is yours to write."
     )
 
 
