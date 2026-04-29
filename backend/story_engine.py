@@ -734,8 +734,19 @@ class StoryEngine:
                             # stacking, TTS, consistency tracker) keeps working.
                             scene_summary = (args.get("scene_summary") or "").strip()
                             shot_intent = (args.get("shot_intent") or "").strip()
+                            pose_hint = (args.get("pose_hint") or "").strip()
                             requested_mood = (args.get("mood") or "neutral").strip() or "neutral"
                             requested_actors = args.get("actors_present", []) or []
+
+                            # ── Debug: did Grok actually emit shot_intent / pose_hint? ──
+                            # Tool-arg keys are the ground truth — if these aren't in
+                            # `args.keys()`, Grok skipped them at the schema layer (not
+                            # parsing/stripping). One log line per scene; cheap & narrow.
+                            _have_si = "shot_intent" in args
+                            _have_ph = "pose_hint" in args
+                            print(f"[narr_args] scene {image_index} keys={sorted(args.keys())} "
+                                  f"shot_intent={'YES('+str(len(shot_intent))+')' if _have_si and shot_intent else ('EMPTY-STR' if _have_si else 'MISSING')} "
+                                  f"pose_hint={'YES('+str(len(pose_hint))+')' if _have_ph and pose_hint else ('EMPTY-STR' if _have_ph else 'MISSING')}")
 
                             # Phase 3D follow-up: server-side presence gate (slice mode).
                             # Strips cast members the resolver did NOT place at the current
@@ -893,6 +904,7 @@ class StoryEngine:
                                 language=session.language or "fr",
                                 player_gender=(session.player or {}).get("gender", "male"),
                                 grok_model=session.grok_model,
+                                pose_hint=pose_hint or None,
                             )
 
                             # Capture appearance for any cast member appearing for the
@@ -974,9 +986,7 @@ class StoryEngine:
                                 "language": session.language or "fr",
                                 "player_gender": (session.player or {}).get("gender", "male"),
                                 "grok_model": session.grok_model,
-                                # pose_hint isn't emitted by the live narrator yet —
-                                # captured as None so the iterate UI can fill it in.
-                                "pose_hint": None,
+                                "pose_hint": pose_hint or None,
                             }
                             log.log_image_prompt_crafted(
                                 image_index, scene_summary, shot_intent, mood_name,
@@ -1792,6 +1802,29 @@ class StoryEngine:
                     if is_first_actor:
                         prompt = f"{prefix}, {prompt}"
             is_first_actor = False
+
+        # Fallback: narrator sometimes invents codenames not in ACTOR_REGISTRY
+        # (e.g. "blonde_stranger", "one_night_stand") for new encounters. The
+        # safety net above only catches misnamed cast members when their actual
+        # trigger word still appears in the prompt — when it doesn't, NO
+        # character LoRA loads and the mood LoRA renders alone, producing an
+        # off-style face. When this happens, fall back to the first LoRA-backed
+        # cast member so the character at least matches the rest of the session.
+        if not character_loras and actors:
+            for cast_code in cast.get("actors", []):
+                cast_actor = ACTOR_REGISTRY.get(cast_code)
+                if not cast_actor or not cast_actor.get("lora_id"):
+                    continue
+                tw = cast_actor.get("trigger_word")
+                character_loras.append(ILora(
+                    model=cast_actor["lora_id"],
+                    weight=char_lora_weight_override if char_lora_weight_override is not None else cast_actor.get("default_weight", 0.8),
+                ))
+                if tw and tw not in prompt:
+                    prompt = f"{tw}, {prompt}"
+                print(f"[lora_fallback] actors_present={actors} matched no LoRA; "
+                      f"loaded cast '{cast_code}' (trigger {tw!r}) as fallback")
+                break
 
         # 2. Style mood LoRAs + cfg/steps overrides (multiple possible, chosen by LLM per scene)
         moods_config = getattr(self, '_session_moods', None) or DEFAULT_STYLE_MOODS

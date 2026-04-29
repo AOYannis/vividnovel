@@ -47,6 +47,21 @@ SCENE_IMAGE_TOOL = {
                         "Optional but strongly recommended — it steers the shot type."
                     ),
                 },
+                "pose_hint": {
+                    "type": "string",
+                    "description": (
+                        "Body position / posture of the actor — FILL THIS for any non-standing "
+                        "scene. Z-Image cannot infer pose from scene_summary alone and will "
+                        "default to 'standing facing camera' otherwise, which breaks massage / "
+                        "lying-down / kneeling / seated / leaning beats. "
+                        "Examples: 'lying face-down on a padded massage table, head turned to "
+                        "side, towel across lower back', 'kneeling on wet sand at the shore, "
+                        "hands on thighs', 'seated cross-legged on the bed, leaning back on "
+                        "one arm', 'leaning forward against the bar, both forearms on the "
+                        "counter'. Empty string ONLY for true standing/walking/face-to-face "
+                        "beats where 'standing' is the obvious natural posture."
+                    ),
+                },
                 "mood": {
                     "type": "string",
                     "description": (
@@ -100,6 +115,8 @@ SCENE_IMAGE_TOOL = {
             "required": [
                 "image_index",
                 "scene_summary",
+                "shot_intent",
+                "pose_hint",
                 "actors_present",
                 "mood",
             ],

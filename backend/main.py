@@ -2168,9 +2168,16 @@ async def get_iterate_scenes(limit: int = 200, user: dict = Depends(get_current_
                         url = img.get("url")
                         if seq_num is not None and idx is not None and url:
                             url_lookup[(sid, seq_num, idx)] = url
+            # ⚠️ Off-by-one between log and DB: story_engine.py logs the
+            # sequence_number BEFORE incrementing it, then runs save_sequence
+            # AFTER the +=1 (story_engine.py:1364 vs :1622). So a scene that
+            # the log says is sequence N has its images stored under N+1 in
+            # the DB. We try N+1 first (matches the established off-by-one)
+            # and fall back to exact N (in case the engine ever fixes it).
             for s in scenes:
-                key = (s["session_id"], s["sequence_number"], s["scene_index"])
-                s["image_url"] = url_lookup.get(key, "")
+                base_key = (s["session_id"], s["sequence_number"], s["scene_index"])
+                shifted_key = (s["session_id"], (s["sequence_number"] or 0) + 1, s["scene_index"])
+                s["image_url"] = url_lookup.get(shifted_key) or url_lookup.get(base_key, "")
         except Exception:
             pass
 
