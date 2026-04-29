@@ -69,9 +69,20 @@ export default function IterateTab() {
   const [moodPromptBlock, setMoodPromptBlock] = useState<string>('')
   const [moodDescription, setMoodDescription] = useState<string>('')
   const [moodCharLoraWeight, setMoodCharLoraWeight] = useState<number | ''>('')
+  // New declarative mood-format fields (kiss-style moods).
+  const [moodFramingIntent, setMoodFramingIntent] = useState<string>('')
+  const [moodExamples, setMoodExamples] = useState<string[]>([])
+  const [moodDirectives, setMoodDirectives] = useState<string[]>([])
   const [loras, setLoras] = useState<LoraEntry[]>([])
   const [availableLoras, setAvailableLoras] = useState<AvailableLora[]>([])
-  const [productionMoods, setProductionMoods] = useState<Record<string, { description: string; prompt_block?: string; lora?: { id: string; name: string; weight: number } | null }>>({})
+  const [productionMoods, setProductionMoods] = useState<Record<string, {
+    description: string
+    prompt_block?: string
+    lora?: { id: string; name: string; weight: number } | null
+    framing_intent?: string
+    examples?: string[]
+    agent_directives?: string[]
+  }>>({})
   // Pose hint — extra body-position/posture guidance the prompt-builder agent
   // uses verbatim. Live narrator doesn't emit this yet; the iterate UI lets
   // you experiment with values before we teach the narrator schema.
@@ -115,18 +126,40 @@ export default function IterateTab() {
     setMoodPromptBlock(md.prompt_block || '')
     setMoodDescription(md.description || '')
     setMoodCharLoraWeight(typeof md.char_lora_weight === 'number' ? md.char_lora_weight : '')
+    setMoodFramingIntent(typeof md.framing_intent === 'string' ? md.framing_intent : '')
+    setMoodExamples(Array.isArray(md.examples) ? md.examples.map(String) : [])
+    setMoodDirectives(Array.isArray(md.agent_directives) ? md.agent_directives.map(String) : [])
     setLoras((selected.loras_applied || []).map((l) => ({ id: l.id, weight: l.weight })))
     setPoseHint(typeof ri.pose_hint === 'string' ? ri.pose_hint : '')
   }, [selected])
+
+  // A mood is in the "new declarative format" when it carries any of
+  // framing_intent / examples / agent_directives. Drives which editor UI
+  // we render (the new 3-section layout vs the legacy single textarea).
+  const isNewFormatMood = useMemo(() => {
+    return Boolean(
+      moodFramingIntent.trim() ||
+      moodExamples.length > 0 ||
+      moodDirectives.length > 0
+    )
+  }, [moodFramingIntent, moodExamples, moodDirectives])
 
   // Detect whether the mood block / LoRAs are still pristine for diff hint.
   const moodIsPristine = useMemo(() => {
     if (!selected) return true
     const md: any = selected.replay_inputs?.mood_data || {}
-    return moodPromptBlock === (md.prompt_block || '') &&
-           moodDescription === (md.description || '') &&
-           moodCharLoraWeight === (typeof md.char_lora_weight === 'number' ? md.char_lora_weight : '')
-  }, [selected, moodPromptBlock, moodDescription, moodCharLoraWeight])
+    const samePromptBlock = moodPromptBlock === (md.prompt_block || '')
+    const sameDesc = moodDescription === (md.description || '')
+    const sameCLW = moodCharLoraWeight === (typeof md.char_lora_weight === 'number' ? md.char_lora_weight : '')
+    const sameFraming = moodFramingIntent === (md.framing_intent || '')
+    const origExamples = Array.isArray(md.examples) ? md.examples.map(String) : []
+    const sameExamples = moodExamples.length === origExamples.length &&
+      moodExamples.every((s, i) => s === origExamples[i])
+    const origDirectives = Array.isArray(md.agent_directives) ? md.agent_directives.map(String) : []
+    const sameDirectives = moodDirectives.length === origDirectives.length &&
+      moodDirectives.every((s, i) => s === origDirectives[i])
+    return samePromptBlock && sameDesc && sameCLW && sameFraming && sameExamples && sameDirectives
+  }, [selected, moodPromptBlock, moodDescription, moodCharLoraWeight, moodFramingIntent, moodExamples, moodDirectives])
   const lorasArePristine = useMemo(() => {
     if (!selected) return true
     const orig = selected.loras_applied || []
@@ -140,13 +173,27 @@ export default function IterateTab() {
     setError('')
     setResult(null)
     try {
-      // Build mood override: take the original mood_data and replace
-      // prompt_block / description / char_lora_weight with the edited values.
+      // Build mood override: start from the captured mood_data, then apply
+      // the edited fields. New-format moods carry framing_intent + examples
+      // + agent_directives (and Grok integrates them); legacy moods carry
+      // prompt_block (and the runtime prepends it). We send both shapes —
+      // the backend picks the right path based on which fields are present.
       const origMd: any = selected.replay_inputs?.mood_data || {}
       const moodOverride: Record<string, any> = {
         ...origMd,
-        prompt_block: moodPromptBlock,
         description: moodDescription,
+      }
+      if (isNewFormatMood) {
+        moodOverride.framing_intent = moodFramingIntent
+        moodOverride.examples = moodExamples.filter((s) => s.trim())
+        moodOverride.agent_directives = moodDirectives.filter((s) => s.trim())
+        // Strip legacy prompt_block so the runtime doesn't double-apply.
+        delete moodOverride.prompt_block
+      } else {
+        moodOverride.prompt_block = moodPromptBlock
+        delete moodOverride.framing_intent
+        delete moodOverride.examples
+        delete moodOverride.agent_directives
       }
       if (moodCharLoraWeight !== '' && !Number.isNaN(Number(moodCharLoraWeight))) {
         moodOverride.char_lora_weight = Number(moodCharLoraWeight)
@@ -211,6 +258,9 @@ export default function IterateTab() {
     setMoodPromptBlock(md.prompt_block || '')
     setMoodDescription(md.description || '')
     setMoodCharLoraWeight(typeof md.char_lora_weight === 'number' ? md.char_lora_weight : '')
+    setMoodFramingIntent(typeof md.framing_intent === 'string' ? md.framing_intent : '')
+    setMoodExamples(Array.isArray(md.examples) ? md.examples.map(String) : [])
+    setMoodDirectives(Array.isArray(md.agent_directives) ? md.agent_directives.map(String) : [])
   }
   const handleResetLoras = () => {
     if (!selected) return
@@ -220,8 +270,11 @@ export default function IterateTab() {
     const m = productionMoods[key]
     if (!m) return
     setMoodName(key)
-    setMoodPromptBlock(m.prompt_block || '')
     setMoodDescription(m.description || '')
+    setMoodPromptBlock(m.prompt_block || '')
+    setMoodFramingIntent(m.framing_intent || '')
+    setMoodExamples(Array.isArray(m.examples) ? m.examples.map(String) : [])
+    setMoodDirectives(Array.isArray(m.agent_directives) ? m.agent_directives.map(String) : [])
     if (m.lora) {
       // Insert/replace the production mood's LoRA in the list (others kept).
       setLoras((prev) => {
@@ -233,7 +286,17 @@ export default function IterateTab() {
   const handleCopyMoodConfig = async () => {
     const cfg: Record<string, any> = {
       description: moodDescription,
-      prompt_block: moodPromptBlock,
+    }
+    if (isNewFormatMood) {
+      // New declarative format — Grok integrates.
+      if (moodFramingIntent.trim()) cfg.framing_intent = moodFramingIntent
+      const exs = moodExamples.filter((s) => s.trim())
+      if (exs.length) cfg.examples = exs
+      const dirs = moodDirectives.filter((s) => s.trim())
+      if (dirs.length) cfg.agent_directives = dirs
+    } else {
+      // Legacy — runtime prepends prompt_block.
+      cfg.prompt_block = moodPromptBlock
     }
     if (moodCharLoraWeight !== '' && !Number.isNaN(Number(moodCharLoraWeight))) {
       cfg.char_lora_weight = Number(moodCharLoraWeight)
@@ -251,7 +314,6 @@ export default function IterateTab() {
     try {
       await navigator.clipboard.writeText(json)
     } catch {
-      // Fallback: show in a window prompt for manual copy
       window.prompt('Copy this mood config and paste into backend/config.py DEFAULT_STYLE_MOODS:', json)
     }
   }
@@ -466,17 +528,124 @@ export default function IterateTab() {
                 />
               </div>
             </div>
-            <div>
-              <label className="text-[10px] text-neutral-500 font-mono">prompt_block (incorporated by Grok into the Z-Image prompt)</label>
-              <textarea
-                value={moodPromptBlock}
-                onChange={(e) => setMoodPromptBlock(e.target.value)}
-                rows={4}
-                placeholder="e.g. soft warm lighting, intimate atmosphere, faces close, hand brushing cheek..."
-                className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-[11px] text-neutral-200 font-mono focus:border-amber-600 focus:outline-none resize-y"
-                spellCheck={false}
-              />
-            </div>
+            {isNewFormatMood ? (
+              <>
+                {/* New declarative mood schema — Grok integrates */}
+                <div className="rounded bg-emerald-950/20 border border-emerald-900/30 px-2 py-1.5 text-[10px] text-emerald-300 font-mono">
+                  ✦ Declarative mood format — Grok integrates examples + directives. No runtime prepend.
+                </div>
+                <div>
+                  <label className="text-[10px] text-neutral-500 font-mono">framing_intent (what this mood IS, in 2-4 lines)</label>
+                  <textarea
+                    value={moodFramingIntent}
+                    onChange={(e) => setMoodFramingIntent(e.target.value)}
+                    rows={3}
+                    placeholder="e.g. Extreme macro POV first-person of HER face/lips approaching the camera..."
+                    className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-[11px] text-neutral-200 font-mono focus:border-amber-600 focus:outline-none resize-y"
+                    spellCheck={false}
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-neutral-500 font-mono">examples (Grok rotates inspiration; never copies verbatim)</label>
+                    <button
+                      onClick={() => setMoodExamples([...moodExamples, ''])}
+                      className="text-[10px] text-amber-500 hover:text-amber-400"
+                    >+ add example</button>
+                  </div>
+                  <div className="space-y-1.5 mt-1">
+                    {moodExamples.map((ex, i) => (
+                      <div key={i} className="flex gap-2 items-start">
+                        <span className="text-[10px] text-neutral-600 font-mono pt-2 select-none">{i + 1}.</span>
+                        <textarea
+                          value={ex}
+                          onChange={(e) => {
+                            const next = [...moodExamples]
+                            next[i] = e.target.value
+                            setMoodExamples(next)
+                          }}
+                          rows={4}
+                          placeholder="A complete reference prompt showing one valid framing for this mood..."
+                          className="flex-1 bg-neutral-950 border border-neutral-800 rounded p-2 text-[11px] text-neutral-200 font-mono focus:border-amber-600 focus:outline-none resize-y"
+                          spellCheck={false}
+                        />
+                        <button
+                          onClick={() => setMoodExamples(moodExamples.filter((_, j) => j !== i))}
+                          className="text-neutral-600 hover:text-red-400 text-xs pt-1.5"
+                          title="remove"
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-neutral-500 font-mono">agent_directives (hard rules Grok MUST obey)</label>
+                    <button
+                      onClick={() => setMoodDirectives([...moodDirectives, ''])}
+                      className="text-[10px] text-amber-500 hover:text-amber-400"
+                    >+ add directive</button>
+                  </div>
+                  <div className="space-y-1 mt-1">
+                    {moodDirectives.map((d, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <span className="text-[10px] text-neutral-600 font-mono select-none">•</span>
+                        <input
+                          type="text"
+                          value={d}
+                          onChange={(e) => {
+                            const next = [...moodDirectives]
+                            next[i] = e.target.value
+                            setMoodDirectives(next)
+                          }}
+                          placeholder='e.g. "DO NOT include any clothing description — out of frame"'
+                          className="flex-1 bg-neutral-950 border border-neutral-800 rounded px-2 py-1.5 text-[11px] text-neutral-200 font-mono focus:border-amber-600 focus:outline-none"
+                          spellCheck={false}
+                        />
+                        <button
+                          onClick={() => setMoodDirectives(moodDirectives.filter((_, j) => j !== i))}
+                          className="text-neutral-600 hover:text-red-400 text-xs"
+                          title="remove"
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="text-[10px] text-neutral-600 font-mono">
+                  Promote this legacy mood to declarative format by filling any of the 3 fields above.
+                  Clear all 3 to revert to legacy prompt_block editor.
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="text-[10px] text-neutral-500 font-mono">prompt_block (legacy — runtime prepends to Z-Image prompt)</label>
+                  <textarea
+                    value={moodPromptBlock}
+                    onChange={(e) => setMoodPromptBlock(e.target.value)}
+                    rows={4}
+                    placeholder="e.g. soft warm lighting, intimate atmosphere, hand brushing cheek..."
+                    className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-[11px] text-neutral-200 font-mono focus:border-amber-600 focus:outline-none resize-y"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-neutral-600 font-mono">
+                    Want directives + examples instead? Click ↓
+                  </span>
+                  <button
+                    onClick={() => {
+                      // Bootstrap into new format with empty fields so the new editor renders.
+                      setMoodFramingIntent('Describe what this mood IS in 2-4 lines (camera framing, who is visible, intent).')
+                      setMoodExamples([''])
+                      setMoodDirectives([''])
+                    }}
+                    className="text-[10px] text-emerald-500 hover:text-emerald-400"
+                    title="Promote to the declarative mood format (framing_intent + examples + agent_directives)"
+                  >✦ promote to declarative format</button>
+                </div>
+              </>
+            )}
             <div className="flex items-center gap-3">
               <label className="text-[10px] text-neutral-500 font-mono">char_lora_weight override (optional, drops main char LoRA when a pose LoRA must dominate):</label>
               <input

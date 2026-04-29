@@ -1844,8 +1844,13 @@ class StoryEngine:
             # PREPEND the full mood block (not just the trigger) right after the
             # actor trigger word — Z-Image weighs the start of the prompt more
             # heavily. This ensures framing/composition directives are honored.
+            #
+            # NEW-FORMAT moods (have framing_intent / examples / agent_directives)
+            # are integrated by the prompt-builder agent itself — skip the
+            # runtime prepend entirely to avoid double-application.
+            _new_format = any(mood_data.get(k) for k in ("framing_intent", "examples", "agent_directives"))
             pb = mood_data.get("prompt_block", "")
-            if pb:
+            if pb and not _new_format:
                 # Avoid duplicating if Grok already echoed the mood block
                 pb_key = pb[:40].lower()
                 if pb_key not in prompt.lower():

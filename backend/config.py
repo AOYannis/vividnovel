@@ -214,22 +214,54 @@ DEFAULT_STYLE_MOODS = {
             "parfait pour les moments d'intimité non explicite mais intenses"
         ),
         "lora": None,
-        "prompt_block": (
-            "An extreme macro close-up POV first-person shot, eye-level intimate close up on woman ready to be kissed from the camera perspective, "
-            "ultra-tight crop of her half face filling the entire frame, "
-            "only the lower half of her face visible with the rest heavily cropped out, "
-            "eyes closed in bliss, head slightly tilted, full glossy lips slightly parted for a kiss to the camera, "
-            "glimpse of moist tongue behind lips and white teeth, "
-            "highly detailed skin texture with subtle pores and natural skin tones, faint lip gloss sheen. "
-            "Shot on 85mm macro lens, Portra Film Photo, ultra shallow depth of field, crisp details, organic textures. "
-            "CRITICAL: only one woman visible"
-        ),
-        "example": (
-            "Her lower face fills the frame, lips parted toward the lens, eyes closed, "
-            "warm rim light catching her cheekbone"
-        ),
         "cfg": 0,
         "steps": 14,
+        # ── Declarative mood teaching (new schema) ──
+        # When `framing_intent` / `examples` / `agent_directives` are present,
+        # the prompt-builder agent (Grok) is responsible for integrating the
+        # mood into the final prompt. The runtime DOES NOT prepend any text.
+        # This replaces the legacy `prompt_block` for this mood.
+        "framing_intent": (
+            "Extreme macro POV first-person of HER face/lips approaching the camera. "
+            "The player IS the camera; only ONE woman is visible in the frame. Body, "
+            "clothing, and the wider room are out of frame."
+        ),
+        "examples": [
+            # Each example is a complete reference prompt showing one valid framing
+            # for this mood. Grok rotates inspiration across them and adapts to the
+            # current scene's character/location/lighting. NEVER copied verbatim.
+            (
+                "young woman, soft warm gaze, head tilted slightly, lower half of her "
+                "face fills the frame, full glossy lips slightly parted toward the camera "
+                "with a glimpse of moist tongue and white teeth, eyes closed in bliss, "
+                "faint lip gloss sheen, warm rim light catching her cheekbone, candlelit "
+                "room glow in soft bokeh background, 85mm macro lens, Portra Film Photo, "
+                "ultra shallow depth of field, natural film grain, organic textures"
+            ),
+            (
+                "three-quarter angle close-up of her face approaching the camera, "
+                "cheekbone and eyelash catchlight visible, lips parted in anticipation "
+                "just before contact, eyes half-closed, single warm key light from the "
+                "side, highly detailed skin texture with subtle pores, 85mm macro, "
+                "shallow depth of field, soft bokeh"
+            ),
+            (
+                "head-on extreme close-up of her parted lips filling the lower half of "
+                "the frame, tip of tongue just visible, eyes closed and tilted slightly "
+                "down, softened ambient glow on her skin, 100mm macro lens, hyper-shallow "
+                "depth of field, natural film grain, intimate quiet atmosphere"
+            ),
+        ],
+        "agent_directives": [
+            # Hard rules Grok MUST obey when crafting this mood's prompt.
+            "ABSOLUTELY ONE woman visible — never any second person, never plural 'faces'.",
+            "Use SINGULAR 'face' — even if scene_summary says 'her lips against yours' "
+            "or similar, interpret 'yours' as the camera (no second visible face).",
+            "DO NOT include any clothing description — out of frame in this framing.",
+            "DO NOT include body description below the collarbone — out of frame.",
+            "Keep appearance details to FACE-ONLY (hair colour visible at temples, eye "
+            "colour, lip shape, freckles, skin tone) — skip height, build, breast/hip notes.",
+        ],
     },
     "sensual_tease": {
         "description": (

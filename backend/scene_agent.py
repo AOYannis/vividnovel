@@ -184,13 +184,30 @@ The lighting style you pick (Layer 3) MUST be consistent with the time of day.
 - some mood specialized do also require a triggerword , see below
 
 # Mood directive
-A mood directive is provided separately when the scene calls for one. The runtime AUTOMATICALLY
-prepends the full mood directive to your prompt. So:
+A mood directive is provided separately when the scene calls for one. There are TWO formats:
+
+LEGACY (most moods today): the runtime AUTOMATICALLY prepends the full mood directive
+to your prompt. For these moods:
 - DO NOT echo or repeat the mood directive.
 - DO NOT redescribe the framing/poses already implied by the mood (e.g. for a `kiss`
   close-up, do NOT mention hands, blouse, or the wider room — they are out of frame).
 - DO write the *unique* details of THIS scene: character identity (hair, eyes, age),
   the specific location, the lighting, 1-2 atmospheric beats, and the camera/film keywords.
+
+NEW DECLARATIVE (e.g. `kiss`): the mood block carries `Framing intent`, `Reference
+examples`, and `Mood directives`. There is NO runtime prepend — YOU are the integrator.
+- READ the framing intent and write a prompt that fits it.
+- DRAW STRUCTURAL INSPIRATION from ONE of the reference examples (rotate across
+  successive calls — don't always pick #1; vary the framing across scenes for variety).
+- NEVER copy a reference example verbatim; ADAPT each phrase to this scene's character,
+  location, lighting, and pose.
+- STRICTLY OBEY every line in the `Mood directives` list — they are non-negotiable
+  (e.g. "skip clothing description", "use singular face", "only one woman visible").
+- ⚠️ **Mood directives OVERRIDE all global continuity rules above.** When a directive
+  says "DO NOT include any clothing description" or "skip body description", do
+  NOT include the locked clothing/appearance even if those blocks were provided.
+  The directive is the source of truth for THIS scene; the lock state stays intact
+  for future non-mood scenes.
 
 # Format
 - English only.
@@ -290,12 +307,53 @@ def _format_pose_block(pose_hint: str | None) -> str:
     )
 
 
+def _is_new_format_mood(mood_data: dict | None) -> bool:
+    """A mood is in the new declarative format when it carries any of
+    `framing_intent`, `examples`, or `agent_directives`. Such moods are
+    integrated into the prompt by Grok (the prompt-builder agent), with NO
+    runtime prepend. Legacy moods (only `prompt_block`) keep the old
+    behaviour: runtime prepends, agent doesn't repeat."""
+    if not isinstance(mood_data, dict):
+        return False
+    return any(mood_data.get(k) for k in ("framing_intent", "examples", "agent_directives"))
+
+
 def _format_mood_block(mood_name: str | None, mood_data: dict | None) -> str:
     if not mood_name or mood_name == "neutral":
         return "Mood: `neutral` — no special framing or LoRA. Compose the shot freely."
     if not mood_data:
         return f"Mood: `{mood_name}` — (mood data not found, default to neutral framing)."
     desc = (mood_data.get("description") or "").strip()
+
+    # New declarative format — Grok is the integrator.
+    if _is_new_format_mood(mood_data):
+        framing = (mood_data.get("framing_intent") or "").strip()
+        examples = mood_data.get("examples") or []
+        directives = mood_data.get("agent_directives") or []
+        out = [f"## Mood: `{mood_name}` — {desc}", ""]
+        out.append("YOU are responsible for integrating this mood into the prompt — there is "
+                   "NO runtime prepend. Read the framing intent, draw structural inspiration "
+                   "from ONE of the reference examples (rotate across calls — don't always use "
+                   "#1), strictly obey every directive, and write a unique prompt for THIS "
+                   "scene's character + location + lighting. Never copy a reference example "
+                   "verbatim, never literally merge two of them.")
+        out.append("")
+        if framing:
+            out.append("Framing intent (what this mood IS):")
+            out.append(framing)
+            out.append("")
+        if examples:
+            out.append("Reference examples (rotate inspiration across them; ADAPT, NEVER copy verbatim):")
+            for i, ex in enumerate(examples, 1):
+                out.append(f"  {i}. {str(ex).strip()}")
+            out.append("")
+        if directives:
+            out.append("Mood directives (MUST obey):")
+            for d in directives:
+                out.append(f"  - {str(d).strip()}")
+        return "\n".join(out)
+
+    # Legacy format — runtime prepends `prompt_block`; agent only sees it as reference.
     pb = (mood_data.get("prompt_block") or "").strip()
     out = [f"Mood: `{mood_name}` — {desc}"]
     if pb:
@@ -375,13 +433,13 @@ Shot intent (camera/tone hint from the narrator):
 Characters visible in this image:
 {actor_block}
 
+{mood_block}
+
 {appearance_block}
 
 {clothing_block}
 
 {pose_block}
-
-{mood_block}
 
 Now produce ONE Z-Image Turbo prompt (raw text, no quotes, no labels) that
 satisfies every rule from the system prompt. If the location is a custom setting
