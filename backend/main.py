@@ -2066,7 +2066,7 @@ async def get_iterate_system_prompt(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/iterate/scenes")
-async def get_iterate_scenes(limit: int = 30, user: dict = Depends(get_current_user)):
+async def get_iterate_scenes(limit: int = 200, user: dict = Depends(get_current_user)):
     """List recent scenes from the current user's sessions, suitable for the
     iterate-tab picker. Each scene includes:
       - session_id, sequence_number, scene_index, timestamp
@@ -2088,7 +2088,11 @@ async def get_iterate_scenes(limit: int = 30, user: dict = Depends(get_current_u
     if not os.path.exists(log_path):
         return {"scenes": []}
 
-    scenes: list[dict] = []
+    # session_log.jsonl is append-only — sequences that were re-run (regen,
+    # retry) appear multiple times for the same (session_id, sequence_number).
+    # We dedupe by (sid, seq, idx) keeping the LATEST log entry, otherwise the
+    # frontend mixes the OLDEST log's prompt/data with the LATEST regen image.
+    by_key: dict[tuple, dict] = {}
     try:
         with open(log_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -2103,7 +2107,7 @@ async def get_iterate_scenes(limit: int = 30, user: dict = Depends(get_current_u
                 ts = entry.get("timestamp", "")
                 events = entry.get("events", []) or []
 
-                # Index events by (type, scene_index) for join.
+                # Index events by scene_index for join (last wins per index too).
                 crafted_by_idx: dict[int, dict] = {}
                 result_by_idx: dict[int, dict] = {}
                 for e in events:
@@ -2121,7 +2125,7 @@ async def get_iterate_scenes(limit: int = 30, user: dict = Depends(get_current_u
                     if not crafted.get("replay_inputs"):
                         continue  # pre-feature scene, can't replay
                     res = result_by_idx.get(idx, {})
-                    scenes.append({
+                    by_key[(sid, seq, idx)] = {
                         "session_id": sid,
                         "sequence_number": seq,
                         "scene_index": idx,
@@ -2132,16 +2136,18 @@ async def get_iterate_scenes(limit: int = 30, user: dict = Depends(get_current_u
                         "actors_present": crafted.get("actors_present", []),
                         "final_prompt": crafted.get("final_prompt", ""),
                         "replay_inputs": crafted.get("replay_inputs"),
-                        "image_url": res.get("final_prompt") and "" or "",  # placeholder
+                        "image_url": "",  # filled below from DB
                         "loras_applied": res.get("loras_applied", []),
                         "seed": res.get("seed"),
                         "width": res.get("width"),
                         "height": res.get("height"),
                         "steps": res.get("steps"),
                         "cfg": res.get("cfg"),
-                    })
+                    }
     except Exception as e:
         raise HTTPException(500, f"Failed to read session log: {e}")
+
+    scenes: list[dict] = list(by_key.values())
 
     # The session_log.jsonl doesn't include image_url directly in image_result —
     # join it from the DB images table for owned sessions. Build an index.
@@ -2184,6 +2190,7 @@ class IterateRecraftRequest(BaseModel):
     loras: Optional[List[dict]] = None  # [{id, weight}] override (replaces ALL)
     mood_data_override: Optional[dict] = None  # full mood dict; replaces mood_data fed to craft_image_prompt
     mood_name_override: Optional[str] = None   # e.g. swap mood label for testing
+    pose_hint_override: Optional[str] = None   # extra pose/posture guidance for the prompt builder
 
 
 @app.post("/api/iterate/recraft")
@@ -2197,10 +2204,11 @@ async def iterate_recraft(req: IterateRecraftRequest, user: dict = Depends(get_c
     from scene_agent import craft_image_prompt
     ri = req.replay_inputs or {}
 
-    # Mood overrides — let the iterate UI swap in an edited prompt_block / LoRA
-    # config without touching the rest of the captured inputs.
+    # Mood + pose overrides — let the iterate UI swap in edited mood data / pose
+    # guidance without touching the rest of the captured inputs.
     effective_mood_name = req.mood_name_override if req.mood_name_override is not None else ri.get("mood_name")
     effective_mood_data = req.mood_data_override if req.mood_data_override is not None else ri.get("mood_data")
+    effective_pose_hint = req.pose_hint_override if req.pose_hint_override is not None else ri.get("pose_hint")
 
     try:
         crafted_prompt, craft_elapsed = await craft_image_prompt(
@@ -2222,19 +2230,22 @@ async def iterate_recraft(req: IterateRecraftRequest, user: dict = Depends(get_c
             player_gender=ri.get("player_gender", "male"),
             grok_model=ri.get("grok_model", "grok-4-1-fast-non-reasoning"),
             system_prompt_override=req.system_prompt,
+            pose_hint=effective_pose_hint,
         )
     except Exception as e:
         raise HTTPException(500, f"Prompt craft failed: {e}")
 
-    seed_to_use = req.seed if (not req.use_original_seed and req.seed is not None) else None
-    # Caller can leave seed=None to randomize OR pass an explicit seed.
+    # Caller passes seed = original-seed (when use_original_seed=True) OR a
+    # custom seed (when use_original_seed=False) OR None (randomize). The
+    # backend just forwards whatever is set — the use_original_seed flag is
+    # only meaningful on the frontend to decide WHICH seed to send.
     gen_args = {
         "image_prompt": crafted_prompt,
         "actors_present": list(ri.get("actors_present", [])),
         "style_moods": ["neutral"] if effective_mood_name in (None, "neutral", "") else [effective_mood_name],
     }
-    if seed_to_use is not None:
-        gen_args["seed"] = seed_to_use
+    if req.seed is not None:
+        gen_args["seed"] = req.seed
 
     # Use the actor list as cast so character LoRAs load.
     cast = {"actors": list(ri.get("actors_present", [])), "actor_voices": {}}
@@ -2258,6 +2269,78 @@ async def iterate_recraft(req: IterateRecraftRequest, user: dict = Depends(get_c
     return {
         "crafted_prompt": crafted_prompt,
         "craft_elapsed": craft_elapsed,
+        "image": img_result,
+        # Echo the values that actually fed the prompt builder, so the
+        # frontend can show a "what was sent" confirmation line. The user
+        # otherwise has no signal that pose_hint / mood_data overrides got
+        # through (the captured-scene panel always shows the original).
+        "applied_overrides": {
+            "pose_hint": effective_pose_hint or "",
+            "mood_name": effective_mood_name or "",
+            "mood_prompt_block_chars": len((effective_mood_data or {}).get("prompt_block", "") or "") if isinstance(effective_mood_data, dict) else 0,
+            "system_prompt_chars": len(req.system_prompt or ""),
+            "loras_count": len(req.loras or []),
+            "seed_used": req.seed,
+        },
+    }
+
+
+class IterateRenderRequest(BaseModel):
+    """Render a final Z-Image prompt directly, skipping the prompt-builder.
+
+    Used by the iterate-tab when the user wants to fine-tune the FINAL prompt
+    (the one Z-Image actually receives) and figure out what the prompt-builder
+    SYSTEM_PROMPT *should* produce. Iterate from the end → fix the agent."""
+    final_prompt: str
+    actors_present: List[str] = []      # for character LoRA loading
+    mood_name: Optional[str] = None     # for mood LoRA selection
+    seed: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    steps: Optional[int] = None
+    loras: Optional[List[dict]] = None  # [{id, weight}] explicit LoRA list
+
+
+@app.post("/api/iterate/render")
+async def iterate_render(req: IterateRenderRequest, user: dict = Depends(get_current_user)):
+    """Render a hand-edited Z-Image prompt verbatim. No Grok call. Returns
+    the same shape as iterate_recraft so the frontend can swap the result
+    image without touching its result-panel layout."""
+    if runware_client is None:
+        raise HTTPException(503, "Runware not connected")
+    if not req.final_prompt or not req.final_prompt.strip():
+        raise HTTPException(400, "final_prompt is required")
+
+    gen_args: dict = {
+        "image_prompt": req.final_prompt,
+        "actors_present": list(req.actors_present),
+        "style_moods": ["neutral"] if req.mood_name in (None, "neutral", "") else [req.mood_name],
+    }
+    if req.seed is not None:
+        gen_args["seed"] = req.seed
+
+    cast = {"actors": list(req.actors_present), "actor_voices": {}}
+    engine = StoryEngine(grok_client, runware_client)
+    try:
+        if req.loras is not None:
+            manual = [{"id": l["id"], "weight": l.get("weight", 0.8)} for l in req.loras]
+            img_result = await engine._generate_image(
+                gen_args, cast,
+                style_loras=manual, extra_loras=[],
+                width=req.width, height=req.height, steps=req.steps,
+            )
+        else:
+            img_result = await engine._generate_image(
+                gen_args, cast,
+                width=req.width, height=req.height, steps=req.steps,
+            )
+    except Exception as e:
+        raise HTTPException(500, f"Image generation failed: {e}")
+
+    # Same shape as recraft so the frontend can reuse its result panel.
+    return {
+        "crafted_prompt": req.final_prompt,
+        "craft_elapsed": 0.0,
         "image": img_result,
     }
 

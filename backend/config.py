@@ -234,13 +234,13 @@ DEFAULT_STYLE_MOODS = {
     "sensual_tease": {
         "description": (
             "Séduction / teasing / flirt — tension, regards, vêtements entrouverts (pas de tout-nu forcé ; "
-            "préférer ce mood à Mystic quand le personnage est encore habillé ou à moitié déshabillé)"
+            "préférer ce mood à Mystic quand le personnage est encore habillé ou à moitié déshabillé, ou nu avant penetration)"
         ),
         "lora": _LORA_ZIT_NSFW_V2_TEASE,
         "prompt_block": (
-            "intimate sensual atmosphere, partial clothing dress or lingerie still on, slipped strap unbuttoned blouse, "
+            "nsfw_master intimate sensual atmosphere, partial clothing dress or lingerie still on, slipped strap unbuttoned blouse, "
             "cleavage bare shoulders skirt hem, warm flirtatious gaze parted lips, soft flush, "
-            "no full nude unless narrative already undressed, photorealistic skin, soft key light"
+            "photorealistic skin, soft key light"
         ),
         "example": (
             "She leans on bar in silk slip dress, lace edge visible, one strap fallen, eye contact toward camera, "
@@ -250,13 +250,13 @@ DEFAULT_STYLE_MOODS = {
         "steps": None,
     },
     "explicit_mystic": {
-        "description": "Explicite générique (Mystic V5) — tension / nu / intimité quand la position n’est pas encore cadrée",
+        "description": "Explicite générique (Mystic V5) — tension / nu / intimité quand il y a une penetration visible, quand la position n’est pas encore cadrée",
         "lora": _LORA_MYSTIC_XXX_ZIT_V5,
         "prompt_block": (
             "POV first-person explicit photograph, as seen through the player eyes, primary focus on her face and body, "
             "nude or partially nude, warm natural skin tones, realistic anatomy, shallow depth of field, "
-            "if the man appears only his hands forearms or lower torso at frame edges never his face or full body, "
-            "bedroom or private interior, passionate expression, soft key light on skin, "
+            "if the man appears only his hands forearms or lower torso at bottom of frame edges, "
+            "bedroom or private interior, or outside in a public place, passionate expression, soft key light on skin, "
             "highly detailed skin texture with subtle pores and natural tones. "
             "Shot on 50mm lens, Portra Film Photo, cinematic color grading, crisp details, organic textures"
         ),
@@ -627,7 +627,7 @@ VIDEO_EARLY_START = False  # if True, start video gen from image 0 instead of wa
 
 # ─── All LoRAs (for debug picker) ────────────────────────────────────────────
 AVAILABLE_LORAS = [
-    {"id": "warmline:2279079@2637792", "name": "ZIT NSFW LoRA v2", "type": "style"},
+    {"id": "warmline:2279079@2637792", "name": "ZIT NSFW LoRA v2", "type": "style", "trigger": "nsfw_master"},
     {"id": "warmline:202603120001@1", "name": "Futagrow", "type": "style"},
     {"id": "warmline:202603120002@1", "name": "NakedErectFutaZit", "type": "style"},
     {"id": "warmline:202603150001@1", "name": "NSFW Hentai", "type": "style"},

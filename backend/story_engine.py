@@ -957,7 +957,7 @@ class StoryEngine:
 
                             # Snapshot of every craft_image_prompt input — lets the
                             # /iterate prompt-lab tab deterministically replay this
-                            # exact scene with a custom SYSTEM_PROMPT.
+                            # exact scene with a custom SYSTEM_PROMPT or pose hint.
                             replay_inputs = {
                                 "scene_summary": scene_summary,
                                 "shot_intent": shot_intent,
@@ -974,6 +974,9 @@ class StoryEngine:
                                 "language": session.language or "fr",
                                 "player_gender": (session.player or {}).get("gender", "male"),
                                 "grok_model": session.grok_model,
+                                # pose_hint isn't emitted by the live narrator yet —
+                                # captured as None so the iterate UI can fill it in.
+                                "pose_hint": None,
                             }
                             log.log_image_prompt_crafted(
                                 image_index, scene_summary, shot_intent, mood_name,

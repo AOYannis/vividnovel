@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  fetchIterateScenes, fetchIterateSystemPrompt, iterateRecraft,
+  fetchIterateScenes, fetchIterateSystemPrompt, iterateRecraft, iterateRender,
   fetchPlaygroundConfig,
   type IterateScene,
 } from '../api/client'
@@ -38,6 +38,14 @@ interface RecraftResult {
       cfg: number
     }
   }
+  applied_overrides?: {
+    pose_hint: string
+    mood_name: string
+    mood_prompt_block_chars: number
+    system_prompt_chars: number
+    loras_count: number
+    seed_used: number | null
+  }
 }
 
 export default function IterateTab() {
@@ -50,6 +58,11 @@ export default function IterateTab() {
   const [useOriginalSeed, setUseOriginalSeed] = useState(true)
   const [recrafting, setRecrafting] = useState(false)
   const [result, setResult] = useState<RecraftResult | null>(null)
+  // Editable copy of the latest crafted prompt — lets the user fine-tune the
+  // FINAL Z-Image prompt directly (skipping Grok) and figure out what the
+  // SYSTEM_PROMPT should produce.
+  const [editedPrompt, setEditedPrompt] = useState<string>('')
+  const [rendering, setRendering] = useState(false)
 
   // Mood + LoRA editor state — re-initialised when user picks a new scene.
   const [moodName, setMoodName] = useState<string>('')
@@ -59,25 +72,33 @@ export default function IterateTab() {
   const [loras, setLoras] = useState<LoraEntry[]>([])
   const [availableLoras, setAvailableLoras] = useState<AvailableLora[]>([])
   const [productionMoods, setProductionMoods] = useState<Record<string, { description: string; prompt_block?: string; lora?: { id: string; name: string; weight: number } | null }>>({})
+  // Pose hint — extra body-position/posture guidance the prompt-builder agent
+  // uses verbatim. Live narrator doesn't emit this yet; the iterate UI lets
+  // you experiment with values before we teach the narrator schema.
+  const [poseHint, setPoseHint] = useState<string>('')
 
   // Load scenes + default SYSTEM_PROMPT + playground config (LoRAs, prod moods) once on mount.
-  useEffect(() => {
+  const loadAll = (autoSelectFirst: boolean) => {
     setLoading(true)
-    Promise.all([fetchIterateScenes(50), fetchIterateSystemPrompt(), fetchPlaygroundConfig()])
+    Promise.all([fetchIterateScenes(200), fetchIterateSystemPrompt(), fetchPlaygroundConfig()])
       .then(([scn, sys, cfg]) => {
         setScenes(scn.scenes || [])
         setSystemPrompt(sys.system_prompt || '')
         setDefaultSystemPrompt(sys.system_prompt || '')
         setAvailableLoras(cfg.loras || [])
         setProductionMoods(cfg.moods || {})
-        if ((scn.scenes || []).length > 0) {
+        if (autoSelectFirst && (scn.scenes || []).length > 0) {
           const first = scn.scenes[0]
           setSelectedKey(`${first.session_id}:${first.sequence_number}:${first.scene_index}`)
         }
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadAll(true) }, [])
+
+  const handleRefresh = () => loadAll(false)
 
   const selected: IterateScene | null = useMemo(() => {
     if (!selectedKey) return null
@@ -95,6 +116,7 @@ export default function IterateTab() {
     setMoodDescription(md.description || '')
     setMoodCharLoraWeight(typeof md.char_lora_weight === 'number' ? md.char_lora_weight : '')
     setLoras((selected.loras_applied || []).map((l) => ({ id: l.id, weight: l.weight })))
+    setPoseHint(typeof ri.pose_hint === 'string' ? ri.pose_hint : '')
   }, [selected])
 
   // Detect whether the mood block / LoRAs are still pristine for diff hint.
@@ -142,12 +164,42 @@ export default function IterateTab() {
         loras: loras.length ? loras : null,
         mood_data_override: moodOverride,
         mood_name_override: moodName || null,
+        pose_hint_override: poseHint.trim() || null,
       })
       setResult(r)
+      setEditedPrompt(r.crafted_prompt)
     } catch (e: any) {
       setError(e.message || 'Recraft failed')
     } finally {
       setRecrafting(false)
+    }
+  }
+
+  const handleRenderEdited = async () => {
+    if (!selected) return
+    if (!editedPrompt.trim()) {
+      setError('Final prompt is empty')
+      return
+    }
+    setRendering(true)
+    setError('')
+    try {
+      const r = await iterateRender({
+        final_prompt: editedPrompt,
+        actors_present: selected.replay_inputs?.actors_present || [],
+        mood_name: moodName || null,
+        seed: useOriginalSeed ? selected.seed : null,
+        width: selected.width,
+        height: selected.height,
+        steps: selected.steps,
+        loras: loras.length ? loras : null,
+      })
+      setResult(r)
+      // Don't reset editedPrompt — keep the user's edits so they can iterate.
+    } catch (e: any) {
+      setError(e.message || 'Render failed')
+    } finally {
+      setRendering(false)
     }
   }
 
@@ -212,9 +264,18 @@ export default function IterateTab() {
 
       {/* Scene picker */}
       <div className="space-y-2">
-        <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">
-          Pick a scene from past games {loading && <span className="text-amber-500 ml-2">loading…</span>}
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">
+            Pick a scene from past games {loading && <span className="text-amber-500 ml-2">loading…</span>}
+            <span className="ml-2 text-neutral-600">({scenes.length} loaded)</span>
+          </label>
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="text-[10px] text-amber-500 hover:text-amber-400 disabled:text-neutral-700"
+            title="Reload the scene list (e.g. after a new sequence ran)"
+          >↻ refresh</button>
+        </div>
         <select
           value={selectedKey}
           onChange={(e) => { setSelectedKey(e.target.value); setResult(null) }}
@@ -294,6 +355,7 @@ export default function IterateTab() {
                   <Field label="player_gender" value={selected.replay_inputs?.player_gender} />
                   <Field label="clothing_state" value={fmtDict(selected.replay_inputs?.clothing_state)} truncate />
                   <Field label="appearance_state" value={fmtDict(selected.replay_inputs?.appearance_state)} truncate />
+                  <Field label="pose_hint" value={selected.replay_inputs?.pose_hint || '(none — narrator does not emit yet)'} truncate />
                 </div>
               </div>
             </div>
@@ -322,6 +384,31 @@ export default function IterateTab() {
             />
             <div className="text-[10px] text-neutral-600 font-mono">
               {systemPrompt.length} chars · {systemPrompt === defaultSystemPrompt ? 'unchanged from default' : 'edited'}
+            </div>
+          </div>
+
+          {/* Pose hint editor — extra body-position guidance the narrator
+              doesn't emit yet but that the prompt-builder agent reads verbatim. */}
+          <div className="space-y-2 pt-3 border-t border-neutral-900">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">
+                Pose hint (body position / posture — anchored verbatim by the prompt builder)
+              </label>
+              <button
+                onClick={() => setPoseHint(typeof selected.replay_inputs?.pose_hint === 'string' ? selected.replay_inputs.pose_hint : '')}
+                className="text-[10px] text-amber-500 hover:text-amber-400"
+              >↺ reset</button>
+            </div>
+            <textarea
+              value={poseHint}
+              onChange={(e) => setPoseHint(e.target.value)}
+              rows={3}
+              placeholder={'e.g. "lying face-down on a padded massage table, head turned to side, towel draped across lower back, arms relaxed at sides"'}
+              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-[11px] text-neutral-200 font-mono focus:border-amber-600 focus:outline-none resize-y"
+              spellCheck={false}
+            />
+            <div className="text-[10px] text-neutral-600 font-mono">
+              Leave empty = no extra pose guidance · Use when scene_summary alone wouldn't make the body posture obvious
             </div>
           </div>
 
@@ -501,7 +588,21 @@ export default function IterateTab() {
 
           {/* Result panel */}
           {result && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-neutral-900">
+            <div className="space-y-3 pt-4 border-t border-neutral-900">
+            {result.applied_overrides && (
+              <div className="rounded bg-emerald-950/30 border border-emerald-900/40 px-3 py-2 text-[11px] text-emerald-200 font-mono">
+                <div className="text-[9px] uppercase tracking-wider text-emerald-500 mb-1">applied to this render</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                  <span>pose_hint: <span className="text-neutral-100">{result.applied_overrides.pose_hint || '(none)'}</span></span>
+                  <span>mood_name: <span className="text-neutral-100">{result.applied_overrides.mood_name || 'neutral'}</span></span>
+                  <span>mood_block: <span className="text-neutral-100">{result.applied_overrides.mood_prompt_block_chars} chars</span></span>
+                  <span>system_prompt: <span className="text-neutral-100">{result.applied_overrides.system_prompt_chars} chars</span></span>
+                  <span>loras: <span className="text-neutral-100">{result.applied_overrides.loras_count}</span></span>
+                  <span>seed: <span className="text-neutral-100">{result.applied_overrides.seed_used ?? 'random'}</span></span>
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-[10px] uppercase tracking-wider text-emerald-500 font-mono">
                   New image (custom SYSTEM_PROMPT)
@@ -519,13 +620,40 @@ export default function IterateTab() {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-wider text-emerald-500 font-mono">
-                  New Z-Image prompt
-                </label>
-                <pre className="bg-neutral-950 border border-emerald-900/40 rounded p-2 text-[11px] text-neutral-300 whitespace-pre-wrap font-mono max-h-[50vh] overflow-y-auto">
-                  {result.crafted_prompt}
-                </pre>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] uppercase tracking-wider text-emerald-500 font-mono">
+                    Z-Image prompt (editable — render directly to skip Grok)
+                  </label>
+                  <button
+                    onClick={() => setEditedPrompt(result.crafted_prompt)}
+                    className="text-[10px] text-amber-500 hover:text-amber-400"
+                    disabled={editedPrompt === result.crafted_prompt}
+                    title="Discard edits and reset to the last crafted prompt"
+                  >↺ reset to crafted</button>
+                </div>
+                <textarea
+                  value={editedPrompt}
+                  onChange={(e) => setEditedPrompt(e.target.value)}
+                  rows={14}
+                  className="w-full bg-neutral-950 border border-emerald-900/40 rounded p-2 text-[11px] text-neutral-200 font-mono focus:border-emerald-500 focus:outline-none resize-y"
+                  spellCheck={false}
+                  style={{ maxHeight: '50vh' }}
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-neutral-600 font-mono">
+                    {editedPrompt.length} chars · {editedPrompt === result.crafted_prompt ? 'unchanged from crafted' : 'edited'}
+                  </span>
+                  <button
+                    onClick={handleRenderEdited}
+                    disabled={rendering || !editedPrompt.trim()}
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-neutral-800 disabled:text-neutral-600 text-white text-xs font-medium rounded transition-colors"
+                    title="Render this prompt directly via Z-Image, skipping the prompt-builder agent"
+                  >
+                    {rendering ? 'Rendering…' : '▶ Render edited prompt'}
+                  </button>
+                </div>
               </div>
+            </div>
             </div>
           )}
         </>

@@ -154,6 +154,14 @@ ethnicity, signature features). Don't paraphrase, don't substitute synonyms ("sh
 describes a change ("hair now wet", "face flushed", "fresh makeup", "tear streaks") —
 in that case keep the locked baseline AND add the situational change on top.
 
+# Pose hint (optional)
+If a "Pose hint" block is provided, anchor the actor's body position/posture to it
+verbatim — be specific in the prompt about lying / kneeling / leaning / standing /
+seated, the exact body orientation, and any contact with surfaces or props (massage
+table, bar, headboard). The narrator only includes this when the pose isn't obvious
+from `scene_summary` alone. When no pose hint is given, infer the natural posture
+from the action.
+
 # Time of day & lighting — CRITICAL
 When a "Time of day" is provided (morning / afternoon / evening / night), the lighting
 MUST match it. Z-Image Turbo defaults to bright daylight if not told otherwise.
@@ -269,6 +277,19 @@ def _format_time_of_day_block(time_of_day: str | None) -> str:
     return f"Time of day: **{time_of_day}** (the lighting in the prompt MUST match this — see system rules)."
 
 
+def _format_pose_block(pose_hint: str | None) -> str:
+    """Optional pose / body-position guidance. Used when the scene needs an
+    explicit posture (lying face-down on a massage table, kneeling on the
+    sand, leaning against the bar) that scene_summary alone wouldn't make
+    obvious. Specialist should anchor the actor's body to this verbatim."""
+    if not pose_hint:
+        return ""
+    return (
+        "## Pose hint (anchor the actor's body to this — be specific in the prompt)\n"
+        f"{pose_hint.strip()}"
+    )
+
+
 def _format_mood_block(mood_name: str | None, mood_data: dict | None) -> str:
     if not mood_name or mood_name == "neutral":
         return "Mood: `neutral` — no special framing or LoRA. Compose the shot freely."
@@ -305,6 +326,7 @@ async def craft_image_prompt(
     player_gender: str,
     grok_model: str = "grok-4-1-fast-non-reasoning",
     system_prompt_override: str | None = None,
+    pose_hint: str | None = None,
 ) -> tuple[str, float]:
     """Synthesise a Z-Image Turbo prompt from a lean narrator scene spec.
 
@@ -320,6 +342,7 @@ async def craft_image_prompt(
     clothing_block = _format_clothing_block(actors_present, clothing_state or {})
     appearance_block = _format_appearance_block(actors_present, appearance_state or {})
     time_block = _format_time_of_day_block(time_of_day)
+    pose_block = _format_pose_block(pose_hint)
 
     # Server-side defense: strip player-back-shot phrasing from the narrator's
     # shot_intent before the specialist sees it. Otherwise Grok composes obediently
@@ -355,6 +378,8 @@ Characters visible in this image:
 {appearance_block}
 
 {clothing_block}
+
+{pose_block}
 
 {mood_block}
 

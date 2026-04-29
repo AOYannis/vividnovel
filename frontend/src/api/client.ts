@@ -625,17 +625,15 @@ export async function fetchIterateScenes(limit = 30): Promise<{ scenes: IterateS
   return res.json()
 }
 
-export async function iterateRecraft(params: {
-  replay_inputs: Record<string, any>
-  system_prompt: string
-  use_original_seed?: boolean
+export async function iterateRender(params: {
+  final_prompt: string
+  actors_present?: string[]
+  mood_name?: string | null
   seed?: number | null
   width?: number
   height?: number
   steps?: number
   loras?: { id: string; weight: number }[] | null
-  mood_data_override?: Record<string, any> | null
-  mood_name_override?: string | null
 }): Promise<{
   crafted_prompt: string
   craft_elapsed: number
@@ -649,6 +647,52 @@ export async function iterateRecraft(params: {
       loras: { id: string; weight: number }[]
       final_prompt: string
     }
+  }
+}> {
+  const res = await apiFetch('/api/iterate/render', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Render failed')
+  }
+  return res.json()
+}
+
+export async function iterateRecraft(params: {
+  replay_inputs: Record<string, any>
+  system_prompt: string
+  use_original_seed?: boolean
+  seed?: number | null
+  width?: number
+  height?: number
+  steps?: number
+  loras?: { id: string; weight: number }[] | null
+  mood_data_override?: Record<string, any> | null
+  mood_name_override?: string | null
+  pose_hint_override?: string | null
+}): Promise<{
+  crafted_prompt: string
+  craft_elapsed: number
+  image: {
+    url: string
+    cost: number
+    seed: number | null
+    elapsed: number
+    settings: {
+      width: number; height: number; steps: number; cfg: number
+      loras: { id: string; weight: number }[]
+      final_prompt: string
+    }
+  }
+  applied_overrides?: {
+    pose_hint: string
+    mood_name: string
+    mood_prompt_block_chars: number
+    system_prompt_chars: number
+    loras_count: number
+    seed_used: number | null
   }
 }> {
   const res = await apiFetch('/api/iterate/recraft', {
