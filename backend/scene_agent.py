@@ -130,6 +130,94 @@ NEVER write "bodies", "they", "them", "their", "two of you", "side-by-side" as
 visible-frame descriptors. Only ONE body is ever in the frame — hers. The player's
 presence is implied by hands/forearms anchored from frame bottom.
 
+## ✦ Contact framings (head-on-shoulder, embrace from side, nestled, leaning against)
+EXCEPTION to "hands at frame bottom": when the action involves the actor PHYSICALLY
+TOUCHING the player's torso/shoulder/chest/lap — head resting on shoulder, nestled
+against chest, arm wrapped around her, leaning into him, hand flat on his chest,
+straddling his lap, head in his lap, etc. — the player's body part she is touching
+SHOULD appear as a SLIVER at the appropriate frame edge in SOFT FOCUS / blurred
+bokeh. The frame edge depends on the geometry of the contact: head-on-RIGHT-shoulder
+→ sliver at frame right; nestled against chest from POV looking down → sliver of
+chest at frame bottom; arm draped from above → sliver at frame top.
+
+What the sliver shows:
+- A jacket sleeve, shirt collar, henley/T-shirt fabric, sweater shoulder, bare arm
+  if shirtless — invent something appropriate to the setting (cyberpunk: synth-leather
+  / utility jacket; period: tailored coat / waistcoat; modern casual: olive jacket /
+  charcoal henley / dark sweater).
+- A few inches of fabric and one small body part (shoulder edge, upper arm, side of
+  chest). NEVER his face, neck, jawline, stubble, hair, or full silhouette.
+- Always SOFT FOCUS / blurred / out of focus / shallow depth of field on the player's
+  body part — Z-Image reads "sliver in soft focus" as bokeh, which prevents the
+  ghost-character bug AND avoids needing pixel-level player-clothing consistency.
+
+❌ BAD : "her head resting tenderly on the player's shoulder with player's forearm
+        visible at frame bottom-left draped along the bench beside her"
+   → renders her on a bench but no spatial relationship — looks like she is alone.
+✅ GOOD: "her head resting against his chest, only a sliver of his charcoal henley
+        shirt and the side of his shoulder visible at frame right in soft focus,
+        her face turned slightly toward him, her hand flat on his chest at frame
+        bottom-right, intimate POV first-person from his perspective"
+   → her dominant in frame, player's body anchored as a blurred sliver at right
+     edge, clearly an embrace from his POV.
+
+❌ BAD : "she straddles the player on the bench, his torso below her"
+   → no visible relationship, may render her floating alone.
+✅ GOOD: "her seated on his lap facing the camera, only a sliver of his dark utility
+        jacket and the curve of his shoulder visible at frame bottom-left in soft
+        focus, her hands resting on his shoulders at frame bottom corners"
+
+The trigger is the ACTION semantics ("touching", "leaning against", "nestled",
+"resting on", "hand on his X", "in his lap"). When you see those in scene_summary
+or pose_hint, switch from "hands-at-bottom" mode to "sliver-at-frame-edge" mode.
+Never use BOTH descriptors for the same scene — pick the one that fits the contact
+geometry.
+
+Three additional rules that make the embrace ACTUALLY read as an embrace in the
+rendered image (each one is non-optional for contact framings):
+
+▸ **Gaze direction MUST point toward him, not the camera.** A girl with her head on
+  someone's shoulder while looking at the camera reads as a posed portrait, not an
+  embrace — the model loses the contact relationship. Always specify gaze:
+  - "her eyes turned away from the camera, looking up toward him"
+  - "her gaze directed at his chest just beside her"
+  - "her eyes closed in contentment, head turned toward his neck"
+  - "her face turned right toward him, looking at his shoulder"
+  NEVER write "looking at the camera", "warm gaze locked on camera", "eyes meeting
+  yours" for contact framings — those gazes break the embrace.
+
+▸ **Framing MUST be CLOSE-UP regardless of shot_intent.** If `shot_intent` says
+  "wide shot" / "tender wide shot" / "atmospheric wide" while the action is contact,
+  OVERRIDE to close-up. Wide shots dissolve the embrace because the actor isn't
+  dominant in the frame. Use phrasings:
+  - "close-up portrait, her face and upper body fill the frame"
+  - "tight intimate close-up, framed from chest up"
+  - "shallow embrace framing, her head and upper torso dominant in composition"
+  Reasoning: a contact embrace needs the actor to OWN the frame so the touch points
+  (her head on his chest, his arm around her) are clearly visible.
+
+▸ **Use MULTIPLE touch anchors, not just one sliver.** A single sliver in soft focus
+  isn't enough for Z-Image to commit to an embrace pose — it'll often hedge by
+  rendering her alone with a random fabric edge. Reinforce with 2-3 contact points:
+  - the sliver itself (her resting against → his shoulder/chest at frame edge)
+  - HIS arm/hand reaching ACROSS to wrap around her shoulders or waist (visible)
+  - HER hand making contact with his torso (flat on his chest, gripping his sleeve)
+  Three converging touch cues = the model commits to "embrace from his POV".
+
+❌ BAD : "her head resting against his shoulder, sliver of dark jacket at frame
+        right in soft focus, warm flirtatious gaze with parted lips" (gaze on
+        camera, single anchor, no framing override)
+   → renders her alone on a bench, looking at viewer, with a random fabric edge.
+✅ GOOD: "close-up portrait of her nestled against his chest, intimate embrace
+        framing from chest up, her face and upper body fill the frame, only a
+        sliver of his charcoal henley shirt and the curve of his shoulder visible
+        at frame right in soft focus, his arm wrapped around her shoulders coming
+        in from frame top-right also in soft focus, her right hand flat on his
+        chest at frame bottom-right, her eyes turned away from the camera looking
+        up toward him with parted lips and soft flush"
+   → three converging touch anchors + close framing + gaze toward him =
+     unmistakable embrace from his POV.
+
 ## ⛔ The player is NEVER a SUBJECT of the frame
 Even if the narrator's `shot_intent` invites one of these — REJECT IT and re-frame as POV:
 - "from behind a figure", "the player from behind", "back turned", "silhouetted figure",
