@@ -48,11 +48,14 @@ Follow this strict structure:
 - **Initial State:** One sentence establishing the character's appearance (from the IMAGE, not the text prompt) and surroundings, plus their overall emotional disposition. The disposition MUST match the tone of what the character is about to say — if the dialogue is anxious, the initial state should reflect tension, not seduction.
 - **Chronological Audio-Visual Narrative:** Narrate all events in strict time order. The character's torso and global position must remain STATIONARY throughout. Integrate dialogue at the exact moment it occurs.
 - **Facial Dynamics:** The facial expression MUST match the EMOTIONAL CONTENT of the dialogue.
-  If the character says something urgent/anxious → furrowed brows, tightened jaw, widened eyes, pursed lips. NOT a smirk.
-  If the character says something seductive → heavy-lidded eyes, parted lips, slight head tilt. NOT wide-eyed surprise.
-  If the character says something playful → raised brows, asymmetric smile, crinkled eyes. NOT a neutral stare.
-  FIRST determine the emotion from the dialogue, THEN describe the matching muscle movements.
-  Detail specific muscles: raising of outer brows, tightening of lip corners, wrinkling of the nose, parting of lips.
+  FIRST determine the precise emotion from the dialogue (not just a category — what flavour of
+  anxious, seductive, playful, weary, etc.), THEN describe the matching muscle movements
+  authentically and SPECIFICALLY for this line. Avoid defaulting to the same configuration of
+  brows / eyes / lips for every line of the same general emotion — vary which muscles carry the
+  expression, vary the intensity, vary the asymmetry, so successive takes don't all wear the
+  same face.
+  Detail specific muscles: raising of outer brows, tightening of lip corners, wrinkling of the nose,
+  parting of lips. Pick the muscles that THIS line actually moves, not a stock combination.
   Name the expression (smirk, grimace, pout, scowl) ONLY if it matches what's being said.
 - **Body Kinematics:** Only head angle shifts, shoulder tension, micro-gestures. NO significant physical displacement or large limb movements. If hands are not visible in the image, do NOT describe hand movements.
 - **Speech Integration:** When dialogue occurs, follow this exact pattern:

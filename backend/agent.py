@@ -230,10 +230,12 @@ async def generate_world_and_agents(
         "You design a tiny lived-in world for an interactive adult fiction game: "
         "a SETTING-FAITHFUL location set + the cast's typical whereabouts. The setting "
         "brief below is the SOURCE OF TRUTH — your locations must feel like they "
-        "belong to THAT setting, not to a generic city. A manor weekend gets manor "
-        "rooms. A yacht cruise gets ship areas. A pirate haven gets pirate-port "
-        "places. A futurist megacity gets futurist places. Never copy locations "
-        "from a different setting.\n\n"
+        "belong to THAT specific setting (its world, its tone, its constraints), not "
+        "to a generic city, and not to the default location set the genre is usually "
+        "drawn with. Read the brief carefully and invent locations that THIS specific "
+        "world would actually have — places this player would actually live in and "
+        "move between — not the locations a different game in the same genre would "
+        "default to. Never copy locations from a different setting.\n\n"
         f"⚠️ CRITICAL: write all `name` and `description` fields in **{lang_label}** "
         f"(this is the player's language). Use names that fit the setting AND the language "
         f"(e.g. for a New York setting in English: 'Your apartment, Brooklyn' not 'Ton appart, "
@@ -431,25 +433,23 @@ async def craft_map_image_prompt(
         "appears as a small architectural vignette or symbolic icon arranged "
         "across the canvas, connected by paths/roads/waterways/transit lines "
         "appropriate to the setting.\n\n"
-        "STYLE — pick a visual treatment that fits the era and tone:\n"
-        "  - Ancient/historical/fantasy → weathered parchment with hand-drawn "
-        "ink, sepia tones, compass rose, decorative cartouches\n"
-        "  - Cyberpunk/futurist → neon-lit isometric schematic, holographic "
-        "grid, glowing data-lines, dark base palette\n"
-        "  - Modern cosy/contemporary → soft watercolour travel-poster style, "
-        "warm pastels, hand-painted feel\n"
-        "  - Belle Époque / 1800s → engraved atlas plate, copperplate hatching, "
-        "ivory paper, ornate border\n"
-        "  - Post-apocalyptic → torn cloth or scrap-metal etched map, muted, "
-        "weathered\n"
-        "Pick whichever fits BEST and commit to it.\n\n"
+        "STYLE — invent a visual treatment that fits THIS specific setting "
+        "(era, tone, palette of the world). Pick a medium (paint, ink, engraving, "
+        "embroidery, photographic, digital, mixed), a colour palette, a degree of "
+        "stylisation, and any cartographic conventions (grid, compass, cartouches, "
+        "annotations, transit lines) that ACTUALLY suit THIS world — not the "
+        "default visual that this genre is usually rendered in. Read the setting "
+        "brief carefully before deciding the look. Commit fully to whatever you pick.\n\n"
         "CRITICAL RULES:\n"
         "  - NO TEXT. NO WORDS. NO LETTERS. NO LABELS. NO SIGNAGE. NO NUMBERS. "
         "Z-Image cannot render text reliably and any attempt produces gibberish.\n"
         "  - NO PEOPLE, NO CHARACTERS, NO PORTRAITS — purely environmental.\n"
-        "  - Each location is recognisable by its silhouette and surroundings "
-        "only (a café = small awning + outdoor tables; a club = neon halo + "
-        "queue rope; a park = trees + paths; a home = small townhouse vignette).\n\n"
+        "  - Each location is recognisable by its silhouette, architecture, and "
+        "immediate surroundings — invent a vignette that fits THIS specific "
+        "location's name and one-line description, not a generic icon for its "
+        "type. The same `type` (café, club, park, home…) should look different "
+        "across different settings and across different locations within the same "
+        "setting, depending on what THIS specific place is.\n\n"
         "INCLUDE: rich atmospheric detail, era-appropriate terrain and "
         "landmarks between the locations, soft vignetting, painterly texture, "
         "high-quality illustration craft.\n\n"
@@ -880,6 +880,81 @@ Include EVERY character listed above (even when changed=false). NO commentary.""
         if code in valid and bool(c.get("changed", False)):
             out.add(code)
     return out
+
+
+async def detect_decor_change(
+    grok_client,
+    *,
+    scene_summary: str,
+    location_id: str,
+    location_name: str,
+    locked_decor: str,
+    language: str = "fr",
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+) -> tuple[bool, str]:
+    """Read a scene summary and decide whether the location's PHYSICAL SPACE
+    materially changed in this scene (renovated, wrecked, repainted, smoke
+    damage, converted into a different kind of space, etc.). Returns
+    (changed, reason). Used to refresh `Location.decor_lock` only when there's
+    a clear narrator-described cause.
+
+    Cost: ~80 input + ~30 output tokens per call (~$0.00002 each on Grok 4.1
+    Fast). Returns (False, "") when scene_summary is empty or no lock exists
+    (no point classifying change against nothing).
+    """
+    if not (scene_summary or "").strip() or not (locked_decor or "").strip():
+        return False, ""
+
+    sys_msg = (
+        "You read a single scene description and decide whether the PHYSICAL "
+        "SPACE of one named location materially CHANGED during the scene. "
+        "Output strict JSON. A change means: structural damage, redecoration, "
+        "renovation, repainting, fire/smoke damage, conversion to a different "
+        "kind of space, the addition or removal of a SIGNATURE permanent "
+        "fixture or piece of furniture — anything the narrator clearly "
+        "describes as altering the room itself. It is NOT a change if the "
+        "narrator merely paraphrases the same space, describes lighting, "
+        "weather, time-of-day, characters present, action, atmosphere, or "
+        "transient objects (a glass on the table, an open book) that don't "
+        "alter the architecture or fixed props. Be conservative: if "
+        "uncertain, return false."
+    )
+    user_msg = f"""Scene description (in {language}):
+{scene_summary[:1000]}
+
+Location: `{location_id}` (« {location_name} »)
+Currently locked decor: « {locked_decor[:300]} »
+
+Did the PHYSICAL SPACE of this location materially change during this scene?
+
+Output strict JSON:
+{{
+  "changed": <true|false>,
+  "what": "<one short phrase, max 80 chars, only when changed=true>"
+}}
+
+NO commentary."""
+
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=grok_model,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.1,
+            max_tokens=120,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content or "{}"
+        data = json.loads(raw)
+    except Exception as e:
+        print(f"[agent] detect_decor_change({location_id}) failed: {e}")
+        return False, ""
+
+    changed = bool(data.get("changed", False))
+    reason = str(data.get("what", "")).strip()[:80]
+    return changed, reason
 
 
 # ─── Phone-chat rendez-vous extractor ────────────────────────────────────

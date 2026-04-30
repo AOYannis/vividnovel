@@ -141,10 +141,11 @@ bokeh. The frame edge depends on the geometry of the contact: head-on-RIGHT-shou
 chest at frame bottom; arm draped from above → sliver at frame top.
 
 What the sliver shows:
-- A jacket sleeve, shirt collar, henley/T-shirt fabric, sweater shoulder, bare arm
-  if shirtless — invent something appropriate to the setting (cyberpunk: synth-leather
-  / utility jacket; period: tailored coat / waistcoat; modern casual: olive jacket /
-  charcoal henley / dark sweater).
+- A small piece of the player's garment (a sleeve, a collar, a shoulder, a lapel,
+  a fold of fabric) — or bare skin if the scene calls for shirtless. Pick a garment
+  detail that is PLAUSIBLE for THIS player in THIS specific setting (read the
+  setting brief and the player block — invent from there, not from the default
+  outfit the era is usually drawn with).
 - A few inches of fabric and one small body part (shoulder edge, upper arm, side of
   chest). NEVER his face, neck, jawline, stubble, hair, or full silhouette.
 - Always SOFT FOCUS / blurred / out of focus / shallow depth of field on the player's
@@ -154,8 +155,8 @@ What the sliver shows:
 ❌ BAD : "her head resting tenderly on the player's shoulder with player's forearm
         visible at frame bottom-left draped along the bench beside her"
    → renders her on a bench but no spatial relationship — looks like she is alone.
-✅ GOOD: "her head resting against his chest, only a sliver of his charcoal henley
-        shirt and the side of his shoulder visible at frame right in soft focus,
+✅ GOOD: "her head resting against his chest, only a sliver of his shirt fabric
+        and the side of his shoulder visible at frame right in soft focus,
         her face turned slightly toward him, her hand flat on his chest at frame
         bottom-right, intimate POV first-person from his perspective"
    → her dominant in frame, player's body anchored as a blurred sliver at right
@@ -163,8 +164,8 @@ What the sliver shows:
 
 ❌ BAD : "she straddles the player on the bench, his torso below her"
    → no visible relationship, may render her floating alone.
-✅ GOOD: "her seated on his lap facing the camera, only a sliver of his dark utility
-        jacket and the curve of his shoulder visible at frame bottom-left in soft
+✅ GOOD: "her seated on his lap facing the camera, only a sliver of his garment
+        and the curve of his shoulder visible at frame bottom-left in soft
         focus, her hands resting on his shoulders at frame bottom corners"
 
 The trigger is the ACTION semantics ("touching", "leaning against", "nestled",
@@ -391,6 +392,23 @@ def _format_clothing_block(actors_present: list[str], clothing_state: dict[str, 
     return "\n".join(lines)
 
 
+def _format_decor_block(decor_lock: str) -> str:
+    """Per-location decor description (locked across all scenes at this location).
+    The specialist MUST honour the architecture, materials, fixed furniture, and
+    fixed props verbatim — no swapping, no recolouring, no re-imagining the room.
+    Time-of-day lighting and pose still vary; the SPACE is constant.
+    """
+    if not (decor_lock or "").strip():
+        return ""
+    return (
+        "Locked decor for THIS location (use VERBATIM — same architecture, "
+        "materials, fixtures, fixed furniture and fixed props as previous scenes "
+        "here. Lighting and time-of-day still vary per the time-of-day block; the "
+        "SPACE is constant):\n"
+        f"{decor_lock.strip()}"
+    )
+
+
 def _format_appearance_block(actors_present: list[str], appearance_state: dict[str, str]) -> str:
     """Per-actor head-and-shoulders lock. Captured from the first scene each
     character appeared in. Stops drift on hair / face / skin / age across scenes.
@@ -512,6 +530,7 @@ async def craft_image_prompt(
     grok_model: str = "grok-4-1-fast-non-reasoning",
     system_prompt_override: str | None = None,
     pose_hint: str | None = None,
+    decor_lock: str = "",
 ) -> tuple[str, float]:
     """Synthesise a Z-Image Turbo prompt from a lean narrator scene spec.
 
@@ -521,11 +540,16 @@ async def craft_image_prompt(
     `system_prompt_override`: when set, replaces the module-level SYSTEM_PROMPT
     for this single call. Used by the /iterate prompt-lab tab to test edits
     against captured historical scene inputs.
+
+    `decor_lock`: per-location dense physical-space description, locked across
+    scenes at this location. When non-empty, surfaced to the specialist as a
+    `Locked decor` block to keep architecture/materials/fixtures consistent.
     """
     actor_block = _format_actor_block(actors_present, actor_lookup)
     mood_block = _format_mood_block(mood_name, mood_data)
     clothing_block = _format_clothing_block(actors_present, clothing_state or {})
     appearance_block = _format_appearance_block(actors_present, appearance_state or {})
+    decor_block = _format_decor_block(decor_lock)
     time_block = _format_time_of_day_block(time_of_day)
     pose_block = _format_pose_block(pose_hint)
 
@@ -547,6 +571,7 @@ async def craft_image_prompt(
 
 Setting: {setting_line}
 Current location (canonical): {location_hint or '(unspecified)'}
+{decor_block}
 {time_block}
 Player gender: {player_gender}
 Story language: {language} (the prompt itself stays in ENGLISH)
@@ -657,6 +682,7 @@ async def extract_clothing(
     codename: str,
     image_prompt: str,
     grok_model: str = "grok-4-1-fast-non-reasoning",
+    prior_lock: str = "",
 ) -> str:
     """Pull a DENSE, REUSABLE clothing description for one character out of an
     already-crafted image prompt. Used to lock the outfit on first sighting AND
@@ -668,6 +694,13 @@ async def extract_clothing(
     it across renders. The extractor is instructed to COMMIT to plausible
     concrete specifics (colour, fabric, hardware) when the source prompt is
     vague — passing vagueness through guarantees visual drift.
+
+    `prior_lock`: when non-empty, this is a RE-EXTRACT after the change
+    classifier flagged a deliberate clothing change. The extractor preserves
+    every element of the prior lock VERBATIM and only updates the specific
+    items the new image prompt clearly describes as changed (opened, removed,
+    torn, swapped). Stops identity drift (e.g. chestnut-brown jacket becoming
+    black on re-extract just because the narrator described it opening).
 
     Returns a comma-separated phrase (~40-110 words) or empty string on
     failure. Cost: ~150 input + ~150 output tokens per call (~$0.00008 each on
@@ -682,19 +715,23 @@ async def extract_clothing(
         "reuse VERBATIM to keep the same garments rendering consistently across "
         "scenes.\n\n"
         "REQUIREMENTS — every garment AND every accessory MUST specify:\n"
-        "  - exact garment shape/cut (sheath dress, A-line skirt, fitted "
-        "blazer, halter top — not 'dress' or 'top')\n"
-        "  - colour NAMED concretely (cobalt blue, charcoal grey, ivory cream, "
-        "oxblood burgundy — not 'blue' or 'dark')\n"
-        "  - fabric/material (matte cotton, polished silk-satin, brushed "
-        "leather, crinkled linen, ribbed knit, distressed denim — never omit)\n"
-        "  - closure/construction details when relevant (zip-back, "
-        "button-front, lace-up, asymmetric hem, drop waist, princess seams)\n"
+        "  - exact garment shape/cut (be specific about silhouette — neckline, "
+        "hem, fit, length, construction. Never write the bare category 'dress' "
+        "or 'top'.)\n"
+        "  - colour NAMED concretely with HUE and SATURATION qualifiers (never "
+        "'blue' or 'dark'). Pick a colour that fits THIS character and THIS "
+        "world specifically — don't default to a recurring palette across "
+        "characters and don't reach for the same handful of colours every time.\n"
+        "  - fabric/material — be specific about weave, weight, finish; never "
+        "omit. Pick what would PLAUSIBLY exist in this character's wardrobe "
+        "given their setting, era, and life.\n"
+        "  - closure/construction details when relevant (be specific — name "
+        "the actual closure, seam, or construction).\n"
         "  - hardware and accessories piece by piece: jewellery with "
-        "metal+colour (brushed gold hoops, blackened-silver chain pendant), "
-        "footwear with material+colour, belts/bags/eyewear with material+colour\n"
-        "  - visible state if explicit in source (slipped strap, "
-        "half-unbuttoned, drenched, torn at hem)\n\n"
+        "metal+colour, footwear with material+colour, belts/bags/eyewear with "
+        "material+colour.\n"
+        "  - visible state if explicit in source (e.g. slipped strap, "
+        "half-unbuttoned, drenched, torn at hem).\n\n"
         "When the source prompt is VAGUE ('revealing pirate silks', 'sleek "
         "corporate mini-dress', 'casual outfit', 'elegant gown'), DO NOT echo "
         "the vagueness. Commit to plausible concrete specifics consistent with "
@@ -716,11 +753,31 @@ async def extract_clothing(
         "BAD: 'blue dress with jewellery' (no shade, no fabric, no shape, "
         "no jewellery type)"
     )
-    user_msg = (
-        f"Character codename: `{codename}`\n\n"
-        f"Image prompt to extract clothing from:\n{image_prompt}\n\n"
-        f"Output the dense clothing phrase:"
-    )
+    if (prior_lock or "").strip():
+        user_msg = (
+            f"Character codename: `{codename}`\n\n"
+            f"PRIOR LOCK (the canonical outfit before this scene — this is the SOURCE OF TRUTH "
+            f"for the character's identity, every word matters):\n"
+            f"« {prior_lock.strip()} »\n\n"
+            f"This is a RE-EXTRACT triggered by the change classifier. The new image prompt "
+            f"below describes the SAME character but with a deliberate change (an item removed, "
+            f"opened, torn, swapped, added, revealed, or repositioned).\n\n"
+            f"Your job: produce the FULL UPDATED LOCK (same shape as a fresh extract — single "
+            f"comma-separated phrase). Update ONLY the specific items the new image prompt "
+            f"clearly indicates were changed. Preserve EVERY OTHER element of the prior lock "
+            f"VERBATIM — same colour names, same fabric/material, same garment shapes, same "
+            f"accessories, same hardware. Identity-defining details MUST NOT drift across this "
+            f"re-extract. If the new prompt is vague about a detail that's in the prior lock, "
+            f"keep the prior lock's wording for it.\n\n"
+            f"Image prompt to extract clothing from:\n{image_prompt}\n\n"
+            f"Output the updated dense clothing phrase:"
+        )
+    else:
+        user_msg = (
+            f"Character codename: `{codename}`\n\n"
+            f"Image prompt to extract clothing from:\n{image_prompt}\n\n"
+            f"Output the dense clothing phrase:"
+        )
     try:
         resp = await grok_client.chat.completions.create(
             model=grok_model,
@@ -737,6 +794,159 @@ async def extract_clothing(
         return text
     except Exception as e:
         print(f"[scene_agent] extract_clothing({codename}) failed: {e}")
+        return ""
+
+
+async def extract_decor(
+    grok_client,
+    *,
+    location_id: str,
+    location_name: str,
+    location_type: str,
+    location_description: str,
+    setting_label: str,
+    custom_setting_text: str,
+    image_prompt: str,
+    grok_model: str = "grok-4-1-fast-non-reasoning",
+    prior_lock: str = "",
+) -> str:
+    """Pull a DENSE, REUSABLE physical-space description for ONE location out of
+    an already-crafted image prompt. Used to lock the decor on first visit AND
+    after a confirmed narrator-described decor change, so future scenes at this
+    same location can re-inject the rich description verbatim and Z-Image renders
+    the same room each time.
+
+    The returned phrase is the source of truth for `Location.decor_lock`. It must
+    be specific enough that Z-Image cannot reasonably re-interpret it across
+    renders. The extractor is instructed to COMMIT to plausible concrete specifics
+    (architecture, materials, fixtures, fixed props) when the source prompt is
+    vague — passing vagueness through guarantees visual drift.
+
+    `prior_lock`: when non-empty, this is a RE-EXTRACT after the change
+    classifier flagged a material decor change. The extractor preserves every
+    element of the prior lock VERBATIM and only updates what the new image
+    prompt clearly describes as physically altered. Stops identity drift (e.g.
+    a chestnut-walnut bar becoming polished black on re-extract just because
+    the narrator described smoke damage).
+
+    Returns a comma-separated phrase (~80-150 words) or empty string on failure.
+    Cost: ~200 input + ~200 output tokens per call (~$0.0001 each on Grok 4.1
+    Fast). Fires once per location on first scene rendered there, plus once
+    whenever the LLM decor-change classifier flags a material change.
+    """
+    if not image_prompt or not location_id:
+        return ""
+    sys_msg = (
+        "You extract the PHYSICAL SPACE (architecture, materials, fixtures, "
+        "fixed furniture, fixed props) of ONE specific location from a Z-Image "
+        "Turbo prompt and produce a dense, factual lock that future prompts at "
+        "this same location will reuse VERBATIM to keep the room rendering "
+        "consistently across scenes.\n\n"
+        "REQUIREMENTS — the lock MUST cover, with concrete specifics:\n"
+        "  - room/space shape and dimensional feel (long narrow gallery, "
+        "low-ceilinged cellar, double-height industrial loft, etc.)\n"
+        "  - architectural style and era cues — be specific about what kind of "
+        "building this is\n"
+        "  - dominant materials with concrete colour + finish (worn oak "
+        "floorboards with grey patina, matte black-cement walls, polished brass "
+        "counter — never bare 'wood' or 'metal')\n"
+        "  - signature furniture pieces named specifically (a curved walnut "
+        "bar with brushed-steel footrail, a low Mid-Century teak coffee table, "
+        "a buttoned oxblood Chesterfield by the window — not 'a bar', 'a table', "
+        "'a sofa')\n"
+        "  - wall treatment (paint colour, tile, panelling, art style — without "
+        "any text/letters since Z-Image cannot render text)\n"
+        "  - fixed atmospheric props (the kind of bottles behind the bar, the "
+        "kind of plants by the window, the rug pattern, the fixtures style)\n"
+        "  - window/door treatment (arched leaded windows, sliding glass with "
+        "brushed-aluminium frame, etc.)\n"
+        "  - ceiling and floor signature details when relevant\n\n"
+        "When the source prompt is VAGUE about decor ('cosy bar', 'modern "
+        "apartment', 'futurist club'), DO NOT echo the vagueness. Commit to "
+        "plausible concrete specifics consistent with the location's name, "
+        "type, one-line description, and the setting brief. The lock is the "
+        "source of truth — a vague lock guarantees visual drift across scenes. "
+        "Pick choices that fit THIS specific place, not the default look the "
+        "genre is usually drawn with.\n\n"
+        "EXCLUDE: people, characters, action, pose, clothing, mood, "
+        "time-of-day lighting (sun direction, lamp on/off), weather, "
+        "scene-specific atmosphere. Those vary per scene; the SPACE is "
+        "constant. Describe the room as it would look in plain ambient light "
+        "with nobody in it.\n\n"
+        "OUTPUT: a single comma-separated phrase, ~80-150 words, no labels, no "
+        "quotes, no commentary. If the source prompt has no decor information at "
+        "all (e.g. extreme close-up of a face with no environment visible), "
+        "infer plausible decor from the location's name + type + description + "
+        "setting and commit to it anyway — a missing lock is worse than a "
+        "reasonable inferred lock.\n\n"
+        "GOOD: 'long narrow Haussmann-era apartment, 3.5m ceilings with white "
+        "ornate cornices, herringbone parquet in honey-toned oak, walls in soft "
+        "ivory with a single charcoal-grey accent wall behind a low Mid-Century "
+        "teak credenza, tall double french doors opening onto a wrought-iron "
+        "balcony, brass picture rail running the perimeter, a buttoned "
+        "oxblood-leather Chesterfield by the window, a worn kilim rug in faded "
+        "ochre and indigo, a tall floor lamp with brushed-brass arm and "
+        "linen-cream shade, two unframed monochrome photographs leaning against "
+        "the wall'\n"
+        "BAD: 'cosy Parisian apartment with warm decor' (vague, no materials, "
+        "no specifics, no signature furniture)\n"
+        "BAD: 'modern bar with dark wood and warm lights' (no shape, no "
+        "specific materials, no fixed props, no signature furniture)"
+    )
+    setting_line = setting_label or "(unspecified setting)"
+    if custom_setting_text:
+        setting_line += f" — custom: {custom_setting_text[:300]}"
+    if (prior_lock or "").strip():
+        user_msg = (
+            f"Location id: `{location_id}`\n"
+            f"Location name: {location_name}\n"
+            f"Location type: {location_type}\n"
+            f"Location one-line description: {location_description or '(none)'}\n"
+            f"Setting: {setting_line}\n\n"
+            f"PRIOR LOCK (the canonical physical space before this scene — this is the SOURCE "
+            f"OF TRUTH for the location's identity, every word matters):\n"
+            f"« {prior_lock.strip()} »\n\n"
+            f"This is a RE-EXTRACT triggered by the change classifier. The new image prompt "
+            f"below describes the SAME location but with a deliberate material change "
+            f"(structural damage, redecoration, repainting, fire/smoke damage, conversion, "
+            f"or a SIGNATURE permanent fixture/furniture added or removed).\n\n"
+            f"Your job: produce the FULL UPDATED LOCK (same shape as a fresh extract — single "
+            f"comma-separated phrase). Update ONLY what the new image prompt clearly indicates "
+            f"was physically altered. Preserve EVERY OTHER element of the prior lock VERBATIM — "
+            f"same room shape, same architectural style, same materials/colours/finishes for "
+            f"untouched surfaces, same signature furniture pieces, same fixed props. "
+            f"Identity-defining details MUST NOT drift across this re-extract. If the new prompt "
+            f"is vague about a detail that's in the prior lock, keep the prior lock's wording "
+            f"for it.\n\n"
+            f"Image prompt to extract decor from:\n{image_prompt}\n\n"
+            f"Output the updated dense decor phrase:"
+        )
+    else:
+        user_msg = (
+            f"Location id: `{location_id}`\n"
+            f"Location name: {location_name}\n"
+            f"Location type: {location_type}\n"
+            f"Location one-line description: {location_description or '(none)'}\n"
+            f"Setting: {setting_line}\n\n"
+            f"Image prompt to extract decor from:\n{image_prompt}\n\n"
+            f"Output the dense decor phrase:"
+        )
+    try:
+        resp = await grok_client.chat.completions.create(
+            model=grok_model,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=420,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if text.startswith(("'", '"')) and text.endswith(("'", '"')) and len(text) > 2:
+            text = text[1:-1].strip()
+        return text
+    except Exception as e:
+        print(f"[scene_agent] extract_decor({location_id}) failed: {e}")
         return ""
 
 

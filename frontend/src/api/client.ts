@@ -672,6 +672,7 @@ export async function iterateRecraft(params: {
   mood_data_override?: Record<string, any> | null
   mood_name_override?: string | null
   pose_hint_override?: string | null
+  decor_lock_override?: string | null
 }): Promise<{
   crafted_prompt: string
   craft_elapsed: number
@@ -693,6 +694,7 @@ export async function iterateRecraft(params: {
     system_prompt_chars: number
     loras_count: number
     seed_used: number | null
+    decor_lock_chars?: number
   }
 }> {
   const res = await apiFetch('/api/iterate/recraft', {

@@ -40,6 +40,10 @@ class Location:
     name: str        # displayed to the player
     type: str        # cafe | bar | home | work | gym | park | club | other
     description: str = ""  # one-liner for the agent's context
+    decor_lock: str = ""   # dense reusable physical-space description, generated on
+                           # first scene rendered here, re-injected verbatim into every
+                           # subsequent image prompt at this location. Refreshed only
+                           # when the narrator describes a material decor change.
 
 
 @dataclass

@@ -30,7 +30,7 @@ from memory import (
 )
 from logger import SequenceLogger
 from davinci import DAVINCI_ENABLED, DAVINCI_TIMEOUT, generate_scene_video as davinci_generate, build_davinci_prompt
-from scene_agent import craft_image_prompt, extract_appearance, extract_clothing
+from scene_agent import craft_image_prompt, extract_appearance, extract_clothing, extract_decor
 from mood_gate import gate_mood, infer_mood_from_summary
 from presence_gate import gate_presence
 
@@ -886,6 +886,15 @@ class StoryEngine:
                             # pick lighting that doesn't default to bright daylight.
                             tod = session.world.slot if session.world else None
 
+                            # Resolve the current location object so we can read its
+                            # decor_lock (set on first scene rendered there, refreshed
+                            # only when the narrator describes a material decor change).
+                            _loc_obj = (
+                                session.world.location_by_id(session.world.current_location)
+                                if session.world else None
+                            )
+                            _decor_lock = (_loc_obj.decor_lock if _loc_obj else "") or ""
+
                             crafted_prompt, craft_elapsed = await craft_image_prompt(
                                 self.grok,
                                 scene_index=image_index,
@@ -905,6 +914,7 @@ class StoryEngine:
                                 player_gender=(session.player or {}).get("gender", "male"),
                                 grok_model=session.grok_model,
                                 pose_hint=pose_hint or None,
+                                decor_lock=_decor_lock,
                             )
 
                             # Capture appearance for any cast member appearing for the
@@ -941,12 +951,23 @@ class StoryEngine:
                                 _just_changed = _ac in _changed_actors
                                 if not (_no_lock or _just_changed):
                                     continue
+                                # On re-extract (clothing-change classifier fired),
+                                # pass the prior lock so the extractor preserves
+                                # identity (colour, material, signature pieces) and
+                                # only updates what the narrator described as changed.
+                                # On first sighting, prior_lock is empty.
+                                _prior_outfit = (
+                                    session.consistency.clothing.get(_ac, "")
+                                    if _just_changed and not _no_lock
+                                    else ""
+                                )
                                 try:
                                     _outfit = await extract_clothing(
                                         self.grok,
                                         codename=_ac,
                                         image_prompt=crafted_prompt,
                                         grok_model=session.grok_model,
+                                        prior_lock=_prior_outfit,
                                     )
                                     if _outfit:
                                         session.consistency.clothing[_ac] = _outfit
@@ -960,6 +981,71 @@ class StoryEngine:
                                         print(f"[clothing] {tag}-locked {_ac}: {_outfit[:80]}")
                                 except Exception as _e:
                                     print(f"[clothing] extract for {_ac} failed: {_e}")
+
+                            # Decor lock — same shape as clothing. Fires:
+                            #   - on FIRST scene at this location (no lock yet) AND
+                            #   - whenever the LLM decor-change classifier flags a
+                            #     material change in the scene_summary (renovation,
+                            #     wreckage, repaint, conversion).
+                            # Uses the just-crafted (rich) image prompt as the source
+                            # so the lock crystallises whatever decor was implied
+                            # there. Subsequent scenes at this location reuse the lock
+                            # verbatim via `decor_lock` arg to craft_image_prompt.
+                            if _loc_obj is not None:
+                                _no_decor_lock = not (_loc_obj.decor_lock or "").strip()
+                                _decor_changed = False
+                                _decor_change_reason = ""
+                                if not _no_decor_lock:
+                                    try:
+                                        from agent import detect_decor_change as _detect_decor
+                                        _decor_changed, _decor_change_reason = await _detect_decor(
+                                            self.grok,
+                                            scene_summary=scene_summary,
+                                            location_id=_loc_obj.id,
+                                            location_name=_loc_obj.name,
+                                            locked_decor=_loc_obj.decor_lock,
+                                            language=session.language or "fr",
+                                            grok_model=session.grok_model,
+                                        )
+                                        if _decor_changed:
+                                            print(f"[decor] change-detected for {_loc_obj.id}: "
+                                                  f"{_decor_change_reason!r}")
+                                    except Exception as _e:
+                                        print(f"[decor] change-detection failed: {_e}; lock held")
+                                        _decor_changed = False
+
+                                if _no_decor_lock or _decor_changed:
+                                    # On re-extract (decor-change classifier fired),
+                                    # pass the prior lock so the extractor preserves
+                                    # identity (architecture, materials, signature
+                                    # furniture) and only updates what the narrator
+                                    # described as physically altered. On first
+                                    # visit, prior_lock is empty.
+                                    _prior_decor = (
+                                        _loc_obj.decor_lock
+                                        if _decor_changed and not _no_decor_lock
+                                        else ""
+                                    )
+                                    try:
+                                        _new_decor = await extract_decor(
+                                            self.grok,
+                                            location_id=_loc_obj.id,
+                                            location_name=_loc_obj.name,
+                                            location_type=_loc_obj.type,
+                                            location_description=_loc_obj.description or "",
+                                            setting_label=setting_label,
+                                            custom_setting_text=session.custom_setting_text or "",
+                                            image_prompt=crafted_prompt,
+                                            grok_model=session.grok_model,
+                                            prior_lock=_prior_decor,
+                                        )
+                                        if _new_decor:
+                                            _loc_obj.decor_lock = _new_decor
+                                            tag = "first" if _no_decor_lock else "changed"
+                                            print(f"[decor] {tag}-locked {_loc_obj.id}: "
+                                                  f"{_new_decor[:80]}")
+                                    except Exception as _e:
+                                        print(f"[decor] extract for {_loc_obj.id} failed: {_e}")
 
                             # Inject specialist output back into args so downstream
                             # code (consistency tracker, _generate_image, frontend
@@ -987,6 +1073,7 @@ class StoryEngine:
                                 "player_gender": (session.player or {}).get("gender", "male"),
                                 "grok_model": session.grok_model,
                                 "pose_hint": pose_hint or None,
+                                "decor_lock": (_loc_obj.decor_lock if _loc_obj else "") or "",
                             }
                             log.log_image_prompt_crafted(
                                 image_index, scene_summary, shot_intent, mood_name,

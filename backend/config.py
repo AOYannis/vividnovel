@@ -694,17 +694,17 @@ AVAILABLE_LORAS = [
 SETTINGS = {
     "paris_2026": {
         "label": "Paris, 2026",
-        "description": "Paris contemporain — bars branchés, terrasses, appartements haussmanniens",
+        "description": "Paris contemporain — vie urbaine d'aujourd'hui, scène ordinaire et intime",
         "era": "contemporain",
     },
     "paris_1800": {
         "label": "Paris, 1830",
-        "description": "Paris romantique — salons, bals, ruelles pavées à la lueur des bougies",
+        "description": "Paris du début du XIXe — moeurs, atmosphère et rythme de l'époque romantique",
         "era": "XIXe siècle",
     },
     "neo_2100": {
         "label": "Neo-Tokyo, 2100",
-        "description": "Mégalopole futuriste — néons, hologrammes, clubs cyberpunk",
+        "description": "Mégalopole futuriste du XXIIe siècle — vie urbaine d'une ville-monde",
         "era": "futuriste",
     },
     # ─── Huis-clos / mystères ──────────────────────────────────────────────

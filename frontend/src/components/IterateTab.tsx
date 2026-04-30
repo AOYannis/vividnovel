@@ -45,6 +45,7 @@ interface RecraftResult {
     system_prompt_chars: number
     loras_count: number
     seed_used: number | null
+    decor_lock_chars?: number
   }
 }
 
@@ -87,6 +88,10 @@ export default function IterateTab() {
   // uses verbatim. Live narrator doesn't emit this yet; the iterate UI lets
   // you experiment with values before we teach the narrator schema.
   const [poseHint, setPoseHint] = useState<string>('')
+  // Decor lock — per-location dense physical-space description. Locked across
+  // scenes at the same location, refreshed only when the narrator describes a
+  // material decor change. Editable here for live tuning.
+  const [decorLock, setDecorLock] = useState<string>('')
 
   // Load scenes + default SYSTEM_PROMPT + playground config (LoRAs, prod moods) once on mount.
   const loadAll = (autoSelectFirst: boolean) => {
@@ -131,6 +136,7 @@ export default function IterateTab() {
     setMoodDirectives(Array.isArray(md.agent_directives) ? md.agent_directives.map(String) : [])
     setLoras((selected.loras_applied || []).map((l) => ({ id: l.id, weight: l.weight })))
     setPoseHint(typeof ri.pose_hint === 'string' ? ri.pose_hint : '')
+    setDecorLock(typeof ri.decor_lock === 'string' ? ri.decor_lock : '')
   }, [selected])
 
   // A mood is in the "new declarative format" when it carries any of
@@ -212,6 +218,7 @@ export default function IterateTab() {
         mood_data_override: moodOverride,
         mood_name_override: moodName || null,
         pose_hint_override: poseHint.trim() || null,
+        decor_lock_override: decorLock,
       })
       setResult(r)
       setEditedPrompt(r.crafted_prompt)
@@ -471,6 +478,32 @@ export default function IterateTab() {
             />
             <div className="text-[10px] text-neutral-600 font-mono">
               Leave empty = no extra pose guidance · Use when scene_summary alone wouldn't make the body posture obvious
+            </div>
+          </div>
+
+          {/* Decor lock editor — per-location dense physical-space description.
+              Locked across all scenes at this location; only refreshed when the
+              narrator describes a material decor change. Edit here for live tuning. */}
+          <div className="space-y-2 pt-3 border-t border-neutral-900">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">
+                Decor lock (per-location physical-space — locked verbatim across scenes here)
+              </label>
+              <button
+                onClick={() => setDecorLock(typeof selected.replay_inputs?.decor_lock === 'string' ? selected.replay_inputs.decor_lock : '')}
+                className="text-[10px] text-amber-500 hover:text-amber-400"
+              >↺ reset</button>
+            </div>
+            <textarea
+              value={decorLock}
+              onChange={(e) => setDecorLock(e.target.value)}
+              rows={5}
+              placeholder={'e.g. "long narrow Haussmann-era apartment, 3.5m ceilings with white ornate cornices, herringbone parquet in honey-toned oak, walls in soft ivory with charcoal-grey accent wall, low Mid-Century teak credenza, tall french doors onto wrought-iron balcony, oxblood-leather Chesterfield by the window, kilim rug in faded ochre and indigo, brushed-brass floor lamp with linen shade"'}
+              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-[11px] text-neutral-200 font-mono focus:border-amber-600 focus:outline-none resize-y"
+              spellCheck={false}
+            />
+            <div className="text-[10px] text-neutral-600 font-mono">
+              {decorLock.length} chars · {decorLock === (typeof selected.replay_inputs?.decor_lock === 'string' ? selected.replay_inputs.decor_lock : '') ? 'unchanged from captured lock' : 'edited'} · Architecture / materials / fixed furniture / fixed props only — lighting and time-of-day are layered separately
             </div>
           </div>
 
@@ -765,6 +798,7 @@ export default function IterateTab() {
                   <span>pose_hint: <span className="text-neutral-100">{result.applied_overrides.pose_hint || '(none)'}</span></span>
                   <span>mood_name: <span className="text-neutral-100">{result.applied_overrides.mood_name || 'neutral'}</span></span>
                   <span>mood_block: <span className="text-neutral-100">{result.applied_overrides.mood_prompt_block_chars} chars</span></span>
+                  <span>decor_lock: <span className="text-neutral-100">{result.applied_overrides.decor_lock_chars ?? 0} chars</span></span>
                   <span>system_prompt: <span className="text-neutral-100">{result.applied_overrides.system_prompt_chars} chars</span></span>
                   <span>loras: <span className="text-neutral-100">{result.applied_overrides.loras_count}</span></span>
                   <span>seed: <span className="text-neutral-100">{result.applied_overrides.seed_used ?? 'random'}</span></span>

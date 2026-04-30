@@ -2198,6 +2198,7 @@ class IterateRecraftRequest(BaseModel):
     mood_data_override: Optional[dict] = None  # full mood dict; replaces mood_data fed to craft_image_prompt
     mood_name_override: Optional[str] = None   # e.g. swap mood label for testing
     pose_hint_override: Optional[str] = None   # extra pose/posture guidance for the prompt builder
+    decor_lock_override: Optional[str] = None  # per-location decor lock; replaces stored lock for this recraft
 
 
 @app.post("/api/iterate/recraft")
@@ -2216,6 +2217,7 @@ async def iterate_recraft(req: IterateRecraftRequest, user: dict = Depends(get_c
     effective_mood_name = req.mood_name_override if req.mood_name_override is not None else ri.get("mood_name")
     effective_mood_data = req.mood_data_override if req.mood_data_override is not None else ri.get("mood_data")
     effective_pose_hint = req.pose_hint_override if req.pose_hint_override is not None else ri.get("pose_hint")
+    effective_decor_lock = req.decor_lock_override if req.decor_lock_override is not None else ri.get("decor_lock", "")
 
     try:
         crafted_prompt, craft_elapsed = await craft_image_prompt(
@@ -2238,6 +2240,7 @@ async def iterate_recraft(req: IterateRecraftRequest, user: dict = Depends(get_c
             grok_model=ri.get("grok_model", "grok-4-1-fast-non-reasoning"),
             system_prompt_override=req.system_prompt,
             pose_hint=effective_pose_hint,
+            decor_lock=effective_decor_lock or "",
         )
     except Exception as e:
         raise HTTPException(500, f"Prompt craft failed: {e}")
@@ -2288,6 +2291,7 @@ async def iterate_recraft(req: IterateRecraftRequest, user: dict = Depends(get_c
             "system_prompt_chars": len(req.system_prompt or ""),
             "loras_count": len(req.loras or []),
             "seed_used": req.seed,
+            "decor_lock_chars": len(effective_decor_lock or ""),
         },
     }
 
