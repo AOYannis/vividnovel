@@ -122,9 +122,16 @@ class SequenceRequest(BaseModel):
     session_id: str
     choice_id: Optional[str] = None
     choice_text: Optional[str] = None
-    choice_target_location_id: Optional[str] = None  # NEW: when narrator
-    # tagged the picked choice with a registered world.location id, the engine
-    # auto-moves the player + advances time (same path as the green ⌖ button).
+    choice_target_location_id: Optional[str] = None  # narrator-tagged location move
+    choice_target_advance_time: Optional[bool] = None  # narrator-tagged time skip;
+    # only meaningful with choice_target_location_id. Defaults to False (instant
+    # move, same slot) so "go to bar across the street" doesn't burn a slot;
+    # narrator sets True for "go to bed" / "head to office in the morning".
+    choice_target_companions: Optional[List[str]] = None  # narrator-tagged "we go
+    # together" — codenames of cast members who accompany the player on this move.
+    # Engine writes a per-slot override on each listed character so they're PRESENT
+    # at the new location next sequence, even if their schedule places them
+    # elsewhere. Naturally expires (override is per-slot).
 
 
 class SystemPromptUpdate(BaseModel):
@@ -384,18 +391,42 @@ async def run_sequence(req: SequenceRequest, user: dict = Depends(get_current_us
     if runware_client is None:
         raise HTTPException(503, "Runware not connected")
 
-    # Auto-move on choice-tagged target_location_id. Same path as the green ⌖
-    # map button: set_location with advance=True (one slot). Silently drops on
-    # missing-location-id or hallucinated id (Grok occasionally invents one).
+    # Auto-move on choice-tagged target_location_id. Default advance=False
+    # (instant move, same slot) — narrator sets target_advance_time=true to
+    # signal explicit time skip ("go to bed", "head to office in the morning").
+    # The green ⌖ map button uses /api/game/go_to_location which keeps its own
+    # advance=True semantic (deliberate user-driven time skip).
     if req.choice_target_location_id and session.world is not None:
         target = req.choice_target_location_id.strip()
         if target and session.world.location_by_id(target) is not None:
             from world import set_location as _set_loc
+            _advance = bool(req.choice_target_advance_time)
             try:
-                _set_loc(session.world, target, advance=True)
+                _set_loc(session.world, target, advance=_advance)
                 session.consistency.location = ""
                 session.consistency.props = []
-                print(f"[location] auto-moved to {target!r} via choice (advance=True)")
+                print(f"[location] auto-moved to {target!r} via choice (advance={_advance})")
+                # "We go together" — write per-slot overrides so the named
+                # companions are present at the new location for the next
+                # sequence (overrides the schedule). Per-slot ⇒ naturally
+                # expires after this sequence; cast member returns to schedule.
+                _companions = req.choice_target_companions or []
+                if _companions:
+                    _slot_key = f"{session.world.day}_{session.world.slot}"
+                    _applied: list[str] = []
+                    for _code in _companions:
+                        _code = (_code or "").strip()
+                        if not _code:
+                            continue
+                        _state = (session.character_states or {}).get(_code)
+                        if _state is None:
+                            print(f"[presence] companion {_code!r} not in cast — skipped")
+                            continue
+                        _state.overrides[_slot_key] = target
+                        _applied.append(_code)
+                    if _applied:
+                        print(f"[presence] companion overrides @ {_slot_key} → {target!r}: "
+                              f"{_applied}")
                 db.fire_and_forget(db.save_session(session))
             except ValueError as e:
                 print(f"[location] auto-move to {target!r} failed: {e}")

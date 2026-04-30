@@ -71,6 +71,8 @@ export interface Choice {
   id: string
   text: string
   target_location_id?: string | null
+  target_advance_time?: boolean | null
+  target_companions?: string[] | null
 }
 
 export interface GrokModel {

@@ -111,6 +111,21 @@ SCENE_IMAGE_TOOL = {
                     ),
                     "additionalProperties": {"type": "string"},
                 },
+                "clothing_changed": {
+                    "type": "object",
+                    "description": (
+                        "Per-actor boolean override for the clothing-change classifier. "
+                        "Set TRUE for actors whose outfit MATERIALLY changed in this scene "
+                        "(she emerged from the changing room in a yukata, he stripped to a "
+                        "towel after a shower, she put on a coat over her dress, she added "
+                        "a hat). Set FALSE or omit for unchanged outfits. Backstop: the "
+                        "engine ALSO runs an LLM classifier on scene_summary, but explicit "
+                        "TRUE here ALWAYS wins. Identity (colour, material, signature pieces) "
+                        "is preserved across the change via the extractor's prior-lock "
+                        "baseline — putting on a hat will NOT recolour the dress."
+                    ),
+                    "additionalProperties": {"type": "boolean"},
+                },
             },
             "required": [
                 "image_index",
@@ -155,10 +170,42 @@ CHOICES_TOOL = {
                                     "registered world.location, set this to the EXACT location.id "
                                     "(snake_case, must match an entry in the world catalogue shown "
                                     "earlier in the system prompt). The engine will auto-move the "
-                                    "player and advance time by one slot when this choice is picked. "
-                                    "Set null for stay-in-place choices (introspection, "
-                                    "current-room actions, sub-area exploration that isn't a "
-                                    "registered location)."
+                                    "player when this choice is picked (time-of-day handled by "
+                                    "`target_advance_time`). Set null for stay-in-place choices "
+                                    "(introspection, current-room actions, sub-area exploration "
+                                    "that isn't a registered location)."
+                                ),
+                            },
+                            "target_advance_time": {
+                                "type": ["boolean", "null"],
+                                "description": (
+                                    "Set TRUE when this choice ALSO advances time by one slot — "
+                                    "sleep, full transit across the day, 'go to bed', 'head "
+                                    "straight to the office in the morning', 'wait until "
+                                    "evening'. Set FALSE (or null) for choices that happen NOW, "
+                                    "INCLUDING most location moves to a different place that the "
+                                    "player can reach immediately ('filer à l'onsen pour un bain "
+                                    "nocturne', 'head to the bar across the street'). Only "
+                                    "meaningful when target_location_id is also set; ignored for "
+                                    "stay-in-place choices."
+                                ),
+                            },
+                            "target_companions": {
+                                "type": ["array", "null"],
+                                "items": {"type": "string"},
+                                "description": (
+                                    "List of cast codenames who EXPLICITLY accompany the player "
+                                    "on this move (the choice text reads as 'we go together', "
+                                    "'invite her along', 'leave with him', 'suggest heading "
+                                    "elsewhere'). The engine writes a per-slot override so each "
+                                    "listed character IS present at target_location_id when the "
+                                    "next sequence runs — even if their schedule places them "
+                                    "elsewhere. Only meaningful when target_location_id is also "
+                                    "set. Use exact codenames from the cast block; do NOT include "
+                                    "the player. Leave null/empty for solo moves ('leave alone', "
+                                    "'slip away on your own', 'head out'). When the choice text "
+                                    "doesn't disambiguate, prefer including any character who "
+                                    "was actively engaging with the player in this scene."
                                 ),
                             },
                         },

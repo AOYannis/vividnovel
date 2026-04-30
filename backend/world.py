@@ -44,6 +44,22 @@ class Location:
                            # first scene rendered here, re-injected verbatim into every
                            # subsequent image prompt at this location. Refreshed only
                            # when the narrator describes a material decor change.
+    canonical_hint: str = ""  # the location_hint that was active when decor_lock was
+                              # first generated. Used to detect whether the current
+                              # scene's hint is the canonical space or a sub-zone.
+    sub_zone_decor_locks: dict[str, str] = field(default_factory=dict)
+                           # per-sub-zone locks (booth, changing room, alcove, etc.),
+                           # keyed by normalize_hint(narrator's location_description).
+                           # Inherits identity from `decor_lock` via prior_lock when
+                           # first generated, so the cedar-wood onsen alcove still
+                           # feels like the same onsen as the entrance lobby.
+
+
+def normalize_hint(hint: str) -> str:
+    """Stable cache key for a location_hint. Lowercased, whitespace-collapsed,
+    truncated to 60 chars. Two scene hints normalize to the same key when they
+    describe the same physical sub-zone with the same opening words."""
+    return " ".join((hint or "").strip().lower().split())[:60]
 
 
 @dataclass

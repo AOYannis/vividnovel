@@ -174,10 +174,16 @@ export default function GamePage() {
   }, [handleKeyDown])
 
   // ── Choice handling ──
-  const handleChoice = useCallback((choice: { id: string; text: string; target_location_id?: string | null }) => {
+  const handleChoice = useCallback((choice: { id: string; text: string; target_location_id?: string | null; target_advance_time?: boolean | null; target_companions?: string[] | null }) => {
     selectChoice(choice)
     resetForNewSequence()
-    startSequence(choice.id, choice.text, choice.target_location_id ?? null)
+    startSequence(
+      choice.id,
+      choice.text,
+      choice.target_location_id ?? null,
+      choice.target_advance_time ?? null,
+      choice.target_companions ?? null,
+    )
   }, [selectChoice, resetForNewSequence, startSequence])
 
   // ── Regen image ──

@@ -356,6 +356,8 @@ export async function streamSequence(
   choiceText?: string,
   onEvent?: (event: SSEEvent) => void,
   choiceTargetLocationId?: string | null,
+  choiceTargetAdvanceTime?: boolean | null,
+  choiceTargetCompanions?: string[] | null,
 ): Promise<void> {
   const res = await apiFetch(`/api/game/sequence`, {
     method: 'POST',
@@ -364,6 +366,8 @@ export async function streamSequence(
       choice_id: choiceId,
       choice_text: choiceText,
       choice_target_location_id: choiceTargetLocationId ?? null,
+      choice_target_advance_time: choiceTargetAdvanceTime ?? null,
+      choice_target_companions: choiceTargetCompanions ?? null,
     }),
   })
 

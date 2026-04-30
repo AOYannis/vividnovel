@@ -11,6 +11,8 @@ export function useStoryStream() {
       choiceId?: string,
       choiceText?: string,
       choiceTargetLocationId?: string | null,
+      choiceTargetAdvanceTime?: boolean | null,
+      choiceTargetCompanions?: string[] | null,
     ) => {
       if (!store.sessionId) return
 
@@ -25,6 +27,8 @@ export function useStoryStream() {
             store.handleSSEEvent(event)
           },
           choiceTargetLocationId ?? null,
+          choiceTargetAdvanceTime ?? null,
+          choiceTargetCompanions ?? null,
         )
       } catch (err) {
         console.error('Stream error:', err)

@@ -838,6 +838,18 @@ class StoryEngine:
                             # Skip the LLM call entirely when there's nothing to gate (no
                             # cast in scene OR no clothing args coming in).
                             _args_clothing = args.get("clothing_state") or {}
+                            # Narrator-asserted explicit flags ALWAYS win over the
+                            # classifier (additive: explicit > inferred). Used for
+                            # location-driven changes the classifier misses
+                            # (yukata at onsen, towel after shower, hat put on).
+                            _args_clothing_changed = args.get("clothing_changed") or {}
+                            _narrator_changed = {
+                                str(code) for code, v in _args_clothing_changed.items()
+                                if isinstance(code, str) and bool(v)
+                            }
+                            if _narrator_changed:
+                                print(f"[clothing] scene {image_index}: narrator-asserted change for "
+                                      f"{sorted(_narrator_changed)}")
                             _changed_actors: set[str] = set()
                             if _args_clothing and actors_present:
                                 try:
@@ -857,6 +869,9 @@ class StoryEngine:
                                     print(f"[clothing] change-detection failed: {_e}; honouring args as-is")
                                     # Fail-open so we don't block on classifier errors
                                     _changed_actors = set(_args_clothing.keys())
+                            # Union: narrator's explicit flag added to whatever the
+                            # classifier caught.
+                            _changed_actors = _changed_actors | _narrator_changed
 
                             _accepted_overrides: dict[str, str] = {}
                             for _ac, _cl in _args_clothing.items():
@@ -886,14 +901,34 @@ class StoryEngine:
                             # pick lighting that doesn't default to bright daylight.
                             tod = session.world.slot if session.world else None
 
-                            # Resolve the current location object so we can read its
-                            # decor_lock (set on first scene rendered there, refreshed
-                            # only when the narrator describes a material decor change).
+                            # Resolve the current location object + decide which lock
+                            # applies for this scene: the canonical decor_lock OR a
+                            # per-sub-zone lock when the narrator's location_hint
+                            # describes a structurally distinct sub-zone (booth,
+                            # changing room, alcove…). Sub-zone keying is normalized
+                            # from location_hint; new sub-zones inherit identity from
+                            # the canonical via prior_lock at extract time.
                             _loc_obj = (
                                 session.world.location_by_id(session.world.current_location)
                                 if session.world else None
                             )
-                            _decor_lock = (_loc_obj.decor_lock if _loc_obj else "") or ""
+                            from world import normalize_hint as _norm_hint
+                            _hint_key = _norm_hint(location_hint)
+                            _is_sub_zone = False
+                            _sub_zone_key = ""
+                            if _loc_obj is None:
+                                _decor_lock = ""
+                            elif not _loc_obj.decor_lock:
+                                # No canonical yet — this scene WILL set the canonical.
+                                _decor_lock = ""
+                            else:
+                                _canonical_key = _norm_hint(_loc_obj.canonical_hint)
+                                if _hint_key == _canonical_key or not _hint_key:
+                                    _decor_lock = _loc_obj.decor_lock
+                                else:
+                                    _decor_lock = _loc_obj.sub_zone_decor_locks.get(_hint_key, "")
+                                    _is_sub_zone = True
+                                    _sub_zone_key = _hint_key
 
                             crafted_prompt, craft_elapsed = await craft_image_prompt(
                                 self.grok,
@@ -982,20 +1017,36 @@ class StoryEngine:
                                 except Exception as _e:
                                     print(f"[clothing] extract for {_ac} failed: {_e}")
 
-                            # Decor lock — same shape as clothing. Fires:
-                            #   - on FIRST scene at this location (no lock yet) AND
-                            #   - whenever the LLM decor-change classifier flags a
-                            #     material change in the scene_summary (renovation,
-                            #     wreckage, repaint, conversion).
-                            # Uses the just-crafted (rich) image prompt as the source
-                            # so the lock crystallises whatever decor was implied
-                            # there. Subsequent scenes at this location reuse the lock
-                            # verbatim via `decor_lock` arg to craft_image_prompt.
+                            # Decor lock — fires on:
+                            #   - first scene at a location (canonical lock created)
+                            #   - first scene in a new sub-zone (sub-zone lock created,
+                            #     inheriting canonical as prior_lock for identity)
+                            #   - whenever the decor-change classifier flags a material
+                            #     transformation of whichever space the lock represents
+                            # The change classifier only runs against an EXISTING lock
+                            # (canonical or sub-zone) — there's nothing to classify
+                            # change against on first visit / first sub-zone.
                             if _loc_obj is not None:
-                                _no_decor_lock = not (_loc_obj.decor_lock or "").strip()
+                                _need_extract = False
+                                _prior_decor = ""
                                 _decor_changed = False
                                 _decor_change_reason = ""
-                                if not _no_decor_lock:
+
+                                if _is_sub_zone:
+                                    if not _decor_lock:
+                                        # New sub-zone: generate; inherit canonical as
+                                        # prior_lock so materials/era/style transfer.
+                                        _need_extract = True
+                                        _prior_decor = _loc_obj.decor_lock or ""
+                                else:
+                                    if not _decor_lock:
+                                        # No canonical yet: first visit.
+                                        _need_extract = True
+                                        _prior_decor = ""
+
+                                # Run change classifier only when a lock already exists
+                                # (against the lock that's actually active for this scene).
+                                if _decor_lock:
                                     try:
                                         from agent import detect_decor_change as _detect_decor
                                         _decor_changed, _decor_change_reason = await _detect_decor(
@@ -1003,29 +1054,20 @@ class StoryEngine:
                                             scene_summary=scene_summary,
                                             location_id=_loc_obj.id,
                                             location_name=_loc_obj.name,
-                                            locked_decor=_loc_obj.decor_lock,
+                                            locked_decor=_decor_lock,
                                             language=session.language or "fr",
                                             grok_model=session.grok_model,
                                         )
                                         if _decor_changed:
-                                            print(f"[decor] change-detected for {_loc_obj.id}: "
+                                            tag = ("sub-zone" if _is_sub_zone else "canonical")
+                                            print(f"[decor:{tag}] change-detected for {_loc_obj.id}: "
                                                   f"{_decor_change_reason!r}")
+                                            _need_extract = True
+                                            _prior_decor = _decor_lock
                                     except Exception as _e:
                                         print(f"[decor] change-detection failed: {_e}; lock held")
-                                        _decor_changed = False
 
-                                if _no_decor_lock or _decor_changed:
-                                    # On re-extract (decor-change classifier fired),
-                                    # pass the prior lock so the extractor preserves
-                                    # identity (architecture, materials, signature
-                                    # furniture) and only updates what the narrator
-                                    # described as physically altered. On first
-                                    # visit, prior_lock is empty.
-                                    _prior_decor = (
-                                        _loc_obj.decor_lock
-                                        if _decor_changed and not _no_decor_lock
-                                        else ""
-                                    )
+                                if _need_extract:
                                     try:
                                         _new_decor = await extract_decor(
                                             self.grok,
@@ -1040,10 +1082,20 @@ class StoryEngine:
                                             prior_lock=_prior_decor,
                                         )
                                         if _new_decor:
-                                            _loc_obj.decor_lock = _new_decor
-                                            tag = "first" if _no_decor_lock else "changed"
-                                            print(f"[decor] {tag}-locked {_loc_obj.id}: "
-                                                  f"{_new_decor[:80]}")
+                                            if _is_sub_zone:
+                                                _loc_obj.sub_zone_decor_locks[_sub_zone_key] = _new_decor
+                                                tag = ("first" if not _decor_lock else "changed")
+                                                print(f"[decor:sub] {tag}-locked "
+                                                      f"{_loc_obj.id}/'{_sub_zone_key}': "
+                                                      f"{_new_decor[:80]}")
+                                            else:
+                                                _was_first = not _decor_lock
+                                                _loc_obj.decor_lock = _new_decor
+                                                if _was_first and not _loc_obj.canonical_hint:
+                                                    _loc_obj.canonical_hint = location_hint or ""
+                                                tag = "first" if _was_first else "changed"
+                                                print(f"[decor] {tag}-locked {_loc_obj.id}: "
+                                                      f"{_new_decor[:80]}")
                                     except Exception as _e:
                                         print(f"[decor] extract for {_loc_obj.id} failed: {_e}")
 
@@ -1073,7 +1125,19 @@ class StoryEngine:
                                 "player_gender": (session.player or {}).get("gender", "male"),
                                 "grok_model": session.grok_model,
                                 "pose_hint": pose_hint or None,
-                                "decor_lock": (_loc_obj.decor_lock if _loc_obj else "") or "",
+                                # Echo the lock that was actually injected for this
+                                # scene (canonical OR sub-zone) — NOT just _loc_obj.decor_lock.
+                                # This way iterate-tab replays the exact state.
+                                "decor_lock": (
+                                    (_loc_obj.sub_zone_decor_locks.get(_sub_zone_key, "")
+                                     if _is_sub_zone and _loc_obj else "")
+                                    or (_loc_obj.decor_lock if _loc_obj else "")
+                                    or ""
+                                ),
+                                "decor_lock_origin": (
+                                    f"sub_zone:{_sub_zone_key}" if _is_sub_zone
+                                    else "canonical"
+                                ),
                             }
                             log.log_image_prompt_crafted(
                                 image_index, scene_summary, shot_intent, mood_name,
