@@ -174,10 +174,10 @@ export default function GamePage() {
   }, [handleKeyDown])
 
   // ── Choice handling ──
-  const handleChoice = useCallback((choice: { id: string; text: string }) => {
+  const handleChoice = useCallback((choice: { id: string; text: string; target_location_id?: string | null }) => {
     selectChoice(choice)
     resetForNewSequence()
-    startSequence(choice.id, choice.text)
+    startSequence(choice.id, choice.text, choice.target_location_id ?? null)
   }, [selectChoice, resetForNewSequence, startSequence])
 
   // ── Regen image ──

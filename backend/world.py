@@ -328,6 +328,44 @@ def who_is_at(
     return present
 
 
+def next_day_slot(world: WorldState) -> tuple[int, str]:
+    """Return the (day, slot) tuple ONE slot in the future, handling the
+    night → next-day-morning rollover. Pure function, no mutation. Used by
+    the cast-presence forecaster to bias choice generation toward locations
+    where the cast WILL be in the next sequence."""
+    i = SLOTS.index(world.slot) if world.slot in SLOTS else 0
+    if i + 1 < len(SLOTS):
+        return (world.day, SLOTS[i + 1])
+    return (world.day + 1, SLOTS[0])
+
+
+def forecast_next_slot_presence(
+    world: WorldState,
+    character_states: dict[str, CharacterState],
+) -> dict[str, list[str]]:
+    """For each location in `world.locations`, return the list of cast
+    codenames who will be there in the NEXT slot. Built on `who_is_at`,
+    so multi-candidate slots ('a|b') resolve via the same `stable_choice`
+    seeding the resolver uses for NOW — the forecast matches what
+    `who_is_at` will actually produce when the player arrives.
+
+    Returns an empty dict when there are no locations or no cast — the
+    caller should treat empty as "no bias available, generate choices
+    freely". Locations with no scheduled cast are omitted from the
+    output (not included as empty lists) to keep the prompt section
+    compact.
+    """
+    if not (world and world.locations) or not character_states:
+        return {}
+    next_day, next_slot = next_day_slot(world)
+    out: dict[str, list[str]] = {}
+    for loc in world.locations:
+        codes = who_is_at(loc.id, next_day, next_slot, character_states)
+        if codes:
+            out[loc.id] = codes
+    return out
+
+
 def all_known_whereabouts(
     day: int,
     slot: str,

@@ -30,6 +30,12 @@ RUNWARE_API_KEY = os.environ.get("RUNWARE_API_KEY", "")
 FAL_API_KEY = os.environ.get("FAL_API_KEY", "")
 WAVESPEEDAI_API_KEY = os.environ.get("WAVESPEEDAI_API_KEY", "")
 XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
+# Venice API keys are issued with the literal prefix `VENICE_INFERENCE_KEY_…`
+# — that prefix IS part of the token, not the env var name. We read a clean
+# `VENICE_API_KEY` env var whose VALUE starts with that prefix, e.g.
+# `VENICE_API_KEY=VENICE_INFERENCE_KEY_xxxxx`.
+VENICE_API_KEY = os.environ.get("VENICE_API_KEY", "")
+VENICE_BASE_URL = "https://api.venice.ai/api/v1"
 runpod_Pruna_API = os.environ.get("runpod_Pruna_API", "")
 
 # ─── Grok ────────────────────────────────────────────────────────────────────

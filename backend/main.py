@@ -17,6 +17,7 @@ from runware import Runware
 
 from config import (
     RUNWARE_API_KEY, XAI_API_KEY, GROK_BASE_URL, GROK_MODEL,
+    VENICE_API_KEY, VENICE_BASE_URL,
     ACTOR_REGISTRY, SETTINGS, GROK_PRICING, GROK_MODELS, AVAILABLE_LORAS,
     DEFAULT_STYLE_MOODS, ADMIN_USER_IDS,
     IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_STEPS,
@@ -121,6 +122,9 @@ class SequenceRequest(BaseModel):
     session_id: str
     choice_id: Optional[str] = None
     choice_text: Optional[str] = None
+    choice_target_location_id: Optional[str] = None  # NEW: when narrator
+    # tagged the picked choice with a registered world.location id, the engine
+    # auto-moves the player + advances time (same path as the green ⌖ button).
 
 
 class SystemPromptUpdate(BaseModel):
@@ -379,6 +383,24 @@ async def run_sequence(req: SequenceRequest, user: dict = Depends(get_current_us
     session = get_user_session(req.session_id, user)
     if runware_client is None:
         raise HTTPException(503, "Runware not connected")
+
+    # Auto-move on choice-tagged target_location_id. Same path as the green ⌖
+    # map button: set_location with advance=True (one slot). Silently drops on
+    # missing-location-id or hallucinated id (Grok occasionally invents one).
+    if req.choice_target_location_id and session.world is not None:
+        target = req.choice_target_location_id.strip()
+        if target and session.world.location_by_id(target) is not None:
+            from world import set_location as _set_loc
+            try:
+                _set_loc(session.world, target, advance=True)
+                session.consistency.location = ""
+                session.consistency.props = []
+                print(f"[location] auto-moved to {target!r} via choice (advance=True)")
+                db.fire_and_forget(db.save_session(session))
+            except ValueError as e:
+                print(f"[location] auto-move to {target!r} failed: {e}")
+        elif target:
+            print(f"[location] choice target {target!r} is not a registered location — ignored")
 
     engine = StoryEngine(grok_client, runware_client)
 
@@ -2534,6 +2556,265 @@ async def playground_manual(req: ManualGenRequest):
         return await _generate_via_wavespeed(req)
     else:
         return await _generate_via_runware(req)
+
+
+# ─── Grok Imagine — image generation + image edit (xAI direct OR Venice) ──
+# Two backends, both accessed via the same playground tab. Venice uses different
+# endpoints (POST /api/v1/image/{edit,generate}), a flat `image` string field
+# (not nested), the model id `grok-imagine-edit`, and returns binary PNG by
+# default (or JSON with base64 images[] when return_binary:false). xAI uses
+# JSON-only responses with data[].url or data[].b64_json. Both are normalised
+# to the same response shape so the playground UI doesn't care which backend
+# served the request.
+
+class GrokImagineEditRequest(BaseModel):
+    image_url: str                              # URL or data:image/...;base64,... or raw base64
+    prompt: str
+    backend: str = "venice"                     # "venice" | "xai"
+    model: Optional[str] = None                 # default chosen per backend if null
+    aspect_ratio: Optional[str] = None
+    # xAI-only
+    n: Optional[int] = None
+    quality: Optional[str] = None
+    resolution: Optional[str] = None
+    response_format: Optional[str] = None
+    user: Optional[str] = None
+    # Venice-only
+    safe_mode: Optional[bool] = None            # Venice default true (blurs adult content)
+
+
+class GrokImagineGenerateRequest(BaseModel):
+    prompt: str
+    backend: str = "venice"
+    model: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    # xAI-only
+    n: Optional[int] = None
+    quality: Optional[str] = None
+    resolution: Optional[str] = None
+    response_format: Optional[str] = None
+    user: Optional[str] = None
+    # Venice-only (text-to-image has more knobs)
+    negative_prompt: Optional[str] = None
+    safe_mode: Optional[bool] = None
+    cfg_scale: Optional[float] = None
+    seed: Optional[int] = None
+    steps: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    format: Optional[str] = None                # jpeg | png | webp
+    style_preset: Optional[str] = None
+    hide_watermark: Optional[bool] = None
+
+
+async def _call_xai_imagine(path: str, body: dict) -> dict:
+    """Direct call to xAI's /v1/images/{generations,edits}. JSON request, JSON
+    response with data[] and usage.cost_in_usd_ticks."""
+    import httpx as _httpx
+    import time as _time
+
+    if not XAI_API_KEY:
+        return {"ok": False, "error": "XAI_API_KEY not configured", "elapsed": 0.0,
+                "request_body": body, "endpoint": path, "backend": "xai"}
+
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {XAI_API_KEY}"}
+    url = f"{GROK_BASE_URL.rstrip('/')}{path}"
+
+    started = _time.time()
+    try:
+        async with _httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.post(url, json=body, headers=headers)
+        elapsed = round(_time.time() - started, 2)
+    except Exception as e:
+        return {"ok": False, "error": f"network/timeout: {type(e).__name__}: {e}",
+                "elapsed": round(_time.time() - started, 2),
+                "request_body": body, "endpoint": path, "backend": "xai"}
+
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"_raw_text": (resp.text or "")[:2000]}
+
+    if resp.status_code != 200:
+        return {"ok": False, "error": f"xAI returned HTTP {resp.status_code}",
+                "status_code": resp.status_code, "response": data,
+                "elapsed": elapsed, "request_body": body, "endpoint": path, "backend": "xai"}
+
+    images_out: list[dict] = []
+    for item in (data.get("data") or []):
+        if not isinstance(item, dict):
+            continue
+        images_out.append({
+            "url": item.get("url") or "",
+            "b64_json": item.get("b64_json") or "",
+            "mime_type": item.get("mime_type") or "",
+            "revised_prompt": item.get("revised_prompt") or "",
+        })
+
+    usage = data.get("usage") or {}
+    cost_ticks = usage.get("cost_in_usd_ticks")
+    # 1 USD tick = $1e-6 per xAI convention.
+    cost_usd = (cost_ticks / 1_000_000.0) if isinstance(cost_ticks, (int, float)) else None
+
+    return {
+        "ok": True, "elapsed": elapsed,
+        "model": data.get("model") or body.get("model"),
+        "images": images_out, "usage": usage, "cost_usd": cost_usd,
+        "raw_response": data, "request_body": body,
+        "endpoint": path, "backend": "xai",
+    }
+
+
+async def _call_venice_imagine(path: str, body: dict, expect_binary: bool) -> dict:
+    """Direct call to Venice's /api/v1/image/{edit,generate}.
+
+    `expect_binary`: True for /image/edit (returns image/png by default; no JSON
+    flag); False for /image/generate when we set return_binary=false (returns
+    JSON {id, images[base64], timing}). Binary responses are base64-encoded and
+    placed under images[].b64_json so the response shape matches xAI's.
+    """
+    import httpx as _httpx
+    import time as _time
+    import base64 as _base64
+
+    if not VENICE_API_KEY:
+        return {"ok": False, "error": "VENICE_INFERENCE_KEY not configured", "elapsed": 0.0,
+                "request_body": body, "endpoint": path, "backend": "venice"}
+
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {VENICE_API_KEY}"}
+    url = f"{VENICE_BASE_URL.rstrip('/')}{path}"
+
+    started = _time.time()
+    try:
+        async with _httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.post(url, json=body, headers=headers)
+        elapsed = round(_time.time() - started, 2)
+    except Exception as e:
+        return {"ok": False, "error": f"network/timeout: {type(e).__name__}: {e}",
+                "elapsed": round(_time.time() - started, 2),
+                "request_body": body, "endpoint": path, "backend": "venice"}
+
+    # Useful Venice header passthroughs surfaced in the UI.
+    venice_headers = {
+        k: v for k, v in resp.headers.items()
+        if k.lower().startswith("x-venice-") or k.lower() == "x-balance-remaining"
+    }
+
+    if resp.status_code != 200:
+        try:
+            err_data = resp.json()
+        except Exception:
+            err_data = {"_raw_text": (resp.text or "")[:2000]}
+        return {"ok": False, "error": f"Venice returned HTTP {resp.status_code}",
+                "status_code": resp.status_code, "response": err_data,
+                "elapsed": elapsed, "request_body": body, "endpoint": path, "backend": "venice",
+                "usage": venice_headers}
+
+    images_out: list[dict] = []
+    raw_for_debug: object
+
+    content_type = resp.headers.get("content-type", "")
+    is_image = expect_binary or content_type.startswith("image/")
+
+    if is_image:
+        mime = (content_type.split(";")[0].strip() or "image/png")
+        b64 = _base64.b64encode(resp.content).decode("ascii")
+        images_out.append({
+            "url": "", "b64_json": b64,
+            "mime_type": mime, "revised_prompt": "",
+        })
+        raw_for_debug = {"_binary_bytes": len(resp.content), "headers": venice_headers}
+    else:
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"_raw_text": (resp.text or "")[:2000]}
+        raw_for_debug = data
+        # Venice JSON shape: {id, images: [base64_string, ...], timing: {...}}
+        for b64 in (data.get("images") or []):
+            if isinstance(b64, str):
+                images_out.append({
+                    "url": "", "b64_json": b64,
+                    "mime_type": f"image/{(body.get('format') or 'webp')}",
+                    "revised_prompt": "",
+                })
+
+    return {
+        "ok": True, "elapsed": elapsed,
+        "model": venice_headers.get("x-venice-model-id") or body.get("model"),
+        "images": images_out,
+        "usage": venice_headers,                # surfaces x-balance-remaining + model headers
+        "cost_usd": None,                       # Venice doesn't return per-call cost
+        "raw_response": raw_for_debug,
+        "request_body": body,
+        "endpoint": path, "backend": "venice",
+    }
+
+
+@app.post("/api/playground/grok_imagine_edit")
+async def playground_grok_imagine_edit(req: GrokImagineEditRequest):
+    """Image-to-image. Routes to xAI or Venice based on req.backend."""
+    if (req.backend or "venice").lower() == "xai":
+        body: dict = {
+            "model": req.model or "grok-imagine-image",
+            "prompt": req.prompt,
+            "image": {"url": req.image_url},          # xAI nests under {url}
+        }
+        for k in ("aspect_ratio", "n", "quality", "resolution", "response_format", "user"):
+            v = getattr(req, k)
+            if v is not None and v != "":
+                body[k] = v
+        return await _call_xai_imagine("/images/edits", body)
+
+    # Venice — flat `image` string. URL passes through, data: URI gets stripped
+    # to raw base64, raw base64 passes through unchanged.
+    image_field = req.image_url or ""
+    if image_field.startswith("data:"):
+        comma = image_field.find(",")
+        if comma > 0:
+            image_field = image_field[comma + 1:]
+    body = {
+        "model": req.model or "grok-imagine-edit",
+        "prompt": req.prompt,
+        "image": image_field,
+    }
+    if req.aspect_ratio:
+        body["aspect_ratio"] = req.aspect_ratio
+    if req.safe_mode is not None:
+        body["safe_mode"] = req.safe_mode
+    return await _call_venice_imagine("/image/edit", body, expect_binary=True)
+
+
+@app.post("/api/playground/grok_imagine_generate")
+async def playground_grok_imagine_generate(req: GrokImagineGenerateRequest):
+    """Text-to-image. Routes to xAI or Venice based on req.backend."""
+    if (req.backend or "venice").lower() == "xai":
+        body: dict = {
+            "model": req.model or "grok-imagine-image",
+            "prompt": req.prompt,
+        }
+        for k in ("aspect_ratio", "n", "quality", "resolution", "response_format", "user"):
+            v = getattr(req, k)
+            if v is not None and v != "":
+                body[k] = v
+        return await _call_xai_imagine("/images/generations", body)
+
+    # Venice — set return_binary=false so we get JSON back with images[] base64.
+    body = {
+        "model": req.model or "grok-imagine-image",
+        "prompt": req.prompt,
+        "return_binary": False,
+    }
+    venice_passthrough = (
+        "aspect_ratio", "negative_prompt", "safe_mode", "cfg_scale",
+        "seed", "steps", "width", "height", "format", "style_preset",
+        "hide_watermark",
+    )
+    for k in venice_passthrough:
+        v = getattr(req, k, None)
+        if v is not None and v != "":
+            body[k] = v
+    return await _call_venice_imagine("/image/generate", body, expect_binary=False)
 
 
 class PlaygroundVideoRequest(BaseModel):

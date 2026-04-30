@@ -7,7 +7,11 @@ export function useStoryStream() {
   const abortRef = useRef<AbortController | null>(null)
 
   const startSequence = useCallback(
-    async (choiceId?: string, choiceText?: string) => {
+    async (
+      choiceId?: string,
+      choiceText?: string,
+      choiceTargetLocationId?: string | null,
+    ) => {
       if (!store.sessionId) return
 
       store.startStreaming()
@@ -20,6 +24,7 @@ export function useStoryStream() {
           (event) => {
             store.handleSSEEvent(event)
           },
+          choiceTargetLocationId ?? null,
         )
       } catch (err) {
         console.error('Stream error:', err)

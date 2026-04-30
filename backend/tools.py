@@ -148,6 +148,19 @@ CHOICES_TOOL = {
                                 "type": "string",
                                 "description": "Description of the choice (1-2 sentences in the SAME LANGUAGE as the narration, 2nd person singular)",
                             },
+                            "target_location_id": {
+                                "type": ["string", "null"],
+                                "description": (
+                                    "If this choice naturally implies the player MOVES to a "
+                                    "registered world.location, set this to the EXACT location.id "
+                                    "(snake_case, must match an entry in the world catalogue shown "
+                                    "earlier in the system prompt). The engine will auto-move the "
+                                    "player and advance time by one slot when this choice is picked. "
+                                    "Set null for stay-in-place choices (introspection, "
+                                    "current-room actions, sub-area exploration that isn't a "
+                                    "registered location)."
+                                ),
+                            },
                         },
                         "required": ["id", "text"],
                     },

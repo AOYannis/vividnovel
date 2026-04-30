@@ -5,6 +5,7 @@ import {
   playgroundTTS, playgroundTTSEnhance, playgroundAudioVideo,
 } from '../api/client'
 import IterateTab from '../components/IterateTab'
+import GrokImagineTab from '../components/GrokImagineTab'
 
 interface PlaygroundConfig {
   actors: { code: string; name: string; description: string }[]
@@ -41,7 +42,7 @@ interface SimResult {
   image_error?: string
 }
 
-type Mode = 'simulate' | 'manual' | 'video' | 'speech' | 'iterate'
+type Mode = 'simulate' | 'manual' | 'video' | 'speech' | 'iterate' | 'imagine'
 
 function LoraEditor({ loras, available, onChange }: {
   loras: { id: string; weight: number }[]
@@ -479,6 +480,11 @@ export default function PlaygroundPage() {
               className={`px-3 py-1 text-xs rounded-md transition-colors ${mode === 'iterate' ? 'bg-amber-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
               title="Iterate on the prompt-builder SYSTEM_PROMPT against captured past scenes"
             >Iterate</button>
+            <button
+              onClick={() => setMode('imagine')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${mode === 'imagine' ? 'bg-amber-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
+              title="Test xAI's Grok Imagine image-edit (image-to-image) endpoint"
+            >Imagine</button>
           </div>
           <div className="flex-1" />
           <span className="text-[10px] text-neutral-600 font-mono">Z-Image Turbo</span>
@@ -492,7 +498,14 @@ export default function PlaygroundPage() {
         </div>
       )}
 
-      {mode !== 'iterate' && (
+      {/* Imagine mode: full-width, manual xAI image-edit playground */}
+      {mode === 'imagine' && (
+        <div className="max-w-[1600px] mx-auto p-4 lg:p-6">
+          <GrokImagineTab />
+        </div>
+      )}
+
+      {mode !== 'iterate' && mode !== 'imagine' && (
       <div className="max-w-[1600px] mx-auto flex flex-col lg:flex-row gap-0 lg:gap-6 p-4 lg:p-6">
         {/* ── Left panel ── */}
         <div className="w-full lg:w-[440px] shrink-0 space-y-4">

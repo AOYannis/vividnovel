@@ -8,8 +8,8 @@ export interface HistorySequence {
   id: string
   sequence_number: number
   narration_segments: string[]
-  choices_offered: { id: string; text: string }[]
-  choice_made: { id: string; text: string } | null
+  choices_offered: { id: string; text: string; target_location_id?: string | null }[]
+  choice_made: { id: string; text: string; target_location_id?: string | null } | null
   costs: any
   images: { id: string; image_index: number; url: string; prompt: string; cost: number; seed: number; generation_time: number; gen_settings: any }[]
   videos: { id: string; url: string; prompt: string; cost: number; generation_time: number }[]

@@ -70,6 +70,7 @@ export interface RelationshipData {
 export interface Choice {
   id: string
   text: string
+  target_location_id?: string | null
 }
 
 export interface GrokModel {

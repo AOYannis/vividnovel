@@ -127,6 +127,72 @@ def _section_language(lang_config: dict, language: str) -> str | None:
     )
 
 
+def _section_choice_bias(world, character_states: dict | None) -> str | None:
+    """Hidden bias for the narrator's a/b/c/d choice generation. Surfaces a
+    forecast of where the cast will be in the NEXT slot so 2-3 of the 4 emitted
+    choices can subtly steer the player toward locations with cast presence —
+    without naming who. Each cast-route choice MUST also carry the matching
+    `target_location_id` in the tool call so the engine can auto-move.
+
+    Returns None when there's nothing to bias on (no world, no locations, no
+    cast schedules). Skipped in classic mode and during the very first
+    sequence before character schedules have been generated.
+    """
+    if world is None or not getattr(world, "locations", None) or not character_states:
+        return None
+    from world import forecast_next_slot_presence, next_day_slot
+    forecast = forecast_next_slot_presence(world, character_states)
+    if not forecast:
+        return None
+    _, next_slot = next_day_slot(world)
+    slot_fr = {"morning": "matin", "afternoon": "après-midi", "evening": "soir", "night": "nuit"}.get(next_slot, next_slot)
+    locs_by_id = {l.id: l for l in world.locations}
+    lines: list[str] = []
+    for loc_id, codes in forecast.items():
+        loc = locs_by_id.get(loc_id)
+        loc_name = loc.name if loc else loc_id
+        codes_str = ", ".join(codes)
+        lines.append(f"- `{loc_id}` ({loc_name}) → cast présent : {codes_str}")
+    # Also list locations where NOBODY from the cast will be (so the narrator
+    # knows which destinations are pure-solo if chosen).
+    other_loc_lines: list[str] = []
+    for loc in world.locations:
+        if loc.id in forecast:
+            continue
+        other_loc_lines.append(f"- `{loc.id}` ({loc.name}) → personne du casting (solo si choisi)")
+    block = (
+        "## Bias caché pour la génération des choix (NE PAS révéler au joueur)\n"
+        f"\n"
+        f"Pour la PROCHAINE séquence (slot suivant : **{slot_fr}**), voici où le casting "
+        f"sera selon les habitudes des personnages :\n"
+        + "\n".join(lines)
+    )
+    if other_loc_lines:
+        block += "\n" + "\n".join(other_loc_lines)
+    block += (
+        "\n\n"
+        "Quand tu génères les 4 choix de fin a/b/c/d :\n"
+        "- Au moins 2 des 4 choix doivent NATURELLEMENT inviter le joueur à se rendre "
+        "dans une destination où un personnage du casting sera présent au slot suivant.\n"
+        "- 1 ou 2 choix peuvent rester sur place / être introspectifs / explorer le "
+        "lieu actuel.\n"
+        "- ⚠️ NE NOMME JAMAIS le personnage qui sera là — le joueur doit le découvrir. "
+        "Phrase comme une intention naturelle (« Filer au [nom] pour décompresser », "
+        "« Passer voir si quelque chose se trame au [nom] »…), pas comme un avis de "
+        "rendez-vous.\n"
+        "- Pour CHAQUE choix qui implique se rendre dans un de ces lieux du "
+        "`world.locations`, RENSEIGNE le champ `target_location_id` du tool call avec "
+        "l'ID EXACT du lieu (ex: `cafe_du_coin`). C'est ce qui permet à l'interface de "
+        "téléporter le joueur. Sans cet ID, le choix reste sur place narrativement même "
+        "s'il sonne comme un déplacement — donc PAS d'oubli sur les choix de "
+        "déplacement.\n"
+        "- Pour les choix qui restent sur place ou explorent une sous-zone du lieu "
+        "actuel (« examiner la X », « te diriger vers le gaillard d'avant »), laisse "
+        "`target_location_id` à null."
+    )
+    return block
+
+
 def _section_originality() -> str:
     return (
         "## ORIGINALITÉ (règle absolue)\n"
@@ -848,6 +914,7 @@ def _build_slice_intro_prompt(
     style_moods: dict | None,
     language: str,
     world,
+    character_states: dict | None = None,
 ) -> str:
     """First-sequence intro prompt — atmospheric tour of the starting location
     that hints (via PROPS / DETAILS) at the OTHER world locations the player
@@ -951,6 +1018,8 @@ def _build_slice_intro_prompt(
     sections.append(_section_video_clip(player))
     sections.append(_section_consistency_rules())
 
+    _push(sections, _section_choice_bias(world, character_states))
+
     # Final choices: 4 destinations from the world (drawn from other_locs)
     if other_locs:
         # Suggest up to 4 destinations as the choice anchors. Grok phrases them
@@ -992,6 +1061,7 @@ def _build_slice_solo_prompt(
     style_moods: dict | None,
     language: str,
     world,
+    character_states: dict | None = None,
 ) -> str:
     """SOLO slice prompt — no cast section, no pool, no relationship state.
 
@@ -1054,6 +1124,31 @@ def _build_slice_solo_prompt(
 
     if previous_choice:
         sections.append(f"## Choix précédent\nLe joueur vient de choisir : « {previous_choice} »")
+        sections.append(
+            "## Continuité — les 8 scènes répondent au choix précédent\n"
+            "\n"
+            "Les 8 scènes de cette séquence DOIVENT continuer l'action ou l'intention "
+            "exprimée par le joueur dans son choix précédent. Pas un nouveau tour "
+            "atmosphérique d'objets indépendant — la séquence trace pas à pas ce que le "
+            "choix a déclenché.\n"
+            "\n"
+            "- Si le choix implique un DÉPLACEMENT (« te diriger vers », « filer à », "
+            "« gagner la… »), même si le moteur n'a pas changé la `current_location`, les "
+            "8 scènes doivent ARRIVER À CET ENDROIT, l'OBSERVER, y vivre quelque chose. "
+            "Tu peux décrire la sous-zone évoquée par le choix (le gaillard d'avant, la "
+            "cale, la mezzanine du salon…) comme une partie du lieu canonique.\n"
+            "- Si le choix est une ACTION sur place (« examiner la X », « ouvrir la Y »), "
+            "les 8 scènes doivent suivre cette action et ses suites — pas zapper sur des "
+            "objets sans rapport.\n"
+            "- Si le choix est INTROSPECTIF (« savourer un instant », « réfléchir »), tu "
+            "peux rester sur le mode atmosphérique mais coloré par l'humeur du choix.\n"
+            "\n"
+            "Le `previous_choice` est la GRAINE narrative de la séquence, pas un détail "
+            "décoratif. Si rien ne se passe d'identifiable suite au choix, c'est une "
+            "séquence ratée."
+        )
+
+    _push(sections, _section_choice_bias(world, character_states))
 
     sections.append(
         f"## Choix de fin (4 obligatoires)\n"
@@ -1097,6 +1192,7 @@ def _build_slice_prompt(
             custom_instructions=custom_instructions,
             custom_setting_text=custom_setting_text,
             style_moods=style_moods, language=language, world=world,
+            character_states=character_states,
         )
 
     # Solo branch (any later quiet beat with no cast at this loc/slot): the
@@ -1108,6 +1204,7 @@ def _build_slice_prompt(
             previous_choice=previous_choice, custom_instructions=custom_instructions,
             custom_setting_text=custom_setting_text, style_moods=style_moods,
             language=language, world=world,
+            character_states=character_states,
         )
     lang_config = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES["fr"])
     setting = SETTINGS.get(setting_id)
@@ -1155,6 +1252,7 @@ def _build_slice_prompt(
             recent_missed_rendezvous=recent_missed_rendezvous,
         )
     )
+    _push(dynamic_sections, _section_choice_bias(world, character_states))
     _push(dynamic_sections, _section_custom_instructions(custom_instructions))
     _push(dynamic_sections, _section_final_language_reminder(lang_config, language))
 

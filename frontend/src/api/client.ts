@@ -355,6 +355,7 @@ export async function streamSequence(
   choiceId?: string,
   choiceText?: string,
   onEvent?: (event: SSEEvent) => void,
+  choiceTargetLocationId?: string | null,
 ): Promise<void> {
   const res = await apiFetch(`/api/game/sequence`, {
     method: 'POST',
@@ -362,6 +363,7 @@ export async function streamSequence(
       session_id: sessionId,
       choice_id: choiceId,
       choice_text: choiceText,
+      choice_target_location_id: choiceTargetLocationId ?? null,
     }),
   })
 
@@ -704,6 +706,81 @@ export async function iterateRecraft(params: {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || 'Recraft failed')
+  }
+  return res.json()
+}
+
+
+export interface GrokImagineEditResult {
+  ok: boolean
+  elapsed: number
+  error?: string
+  status_code?: number
+  model?: string
+  images?: { url: string; b64_json: string; mime_type: string; revised_prompt: string }[]
+  usage?: Record<string, any>
+  cost_usd?: number | null
+  raw_response?: any
+  request_body?: any
+  response?: any
+}
+
+export async function grokImagineEdit(params: {
+  image_url: string
+  prompt: string
+  backend?: 'venice' | 'xai'
+  model?: string | null
+  aspect_ratio?: string | null
+  // xAI-only
+  n?: number | null
+  quality?: string | null
+  resolution?: string | null
+  response_format?: string | null
+  user?: string | null
+  // Venice-only
+  safe_mode?: boolean | null
+}): Promise<GrokImagineEditResult> {
+  const res = await apiFetch('/api/playground/grok_imagine_edit', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Grok Imagine edit failed')
+  }
+  return res.json()
+}
+
+export async function grokImagineGenerate(params: {
+  prompt: string
+  backend?: 'venice' | 'xai'
+  model?: string | null
+  aspect_ratio?: string | null
+  // xAI-only
+  n?: number | null
+  quality?: string | null
+  resolution?: string | null
+  response_format?: string | null
+  user?: string | null
+  // Venice-only
+  negative_prompt?: string | null
+  safe_mode?: boolean | null
+  cfg_scale?: number | null
+  seed?: number | null
+  steps?: number | null
+  width?: number | null
+  height?: number | null
+  format?: string | null
+  style_preset?: string | null
+  hide_watermark?: boolean | null
+}): Promise<GrokImagineEditResult> {
+  const res = await apiFetch('/api/playground/grok_imagine_generate', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Grok Imagine generate failed')
   }
   return res.json()
 }
